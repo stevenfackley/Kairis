@@ -28,6 +28,21 @@ Core product idea:
 - Brand meaning: disciplined timing and controlled action
 - Brand stance: serious, calm, and control-oriented
 
+## Selected Brand Direction
+
+The selected initial logo direction is `Threshold K`.
+
+- Primary logo concept: [kairis-threshold-k.svg](assets/logos/kairis-threshold-k.svg)
+- Brand metaphor: a controlled threshold between signal and execution
+- Visual posture: dark, precise, calm, and instrument-like rather than loud or speculative
+- Primary palette:
+  - Obsidian: `#111315`
+  - Bone: `#E9E4D8`
+  - Sage Signal: `#708B7A`
+  - Brass Index: `#C8B27A`
+
+Alternative concepts remain in the repo for reference, but `Threshold K` is the current source-of-truth direction for branding work.
+
 ## Current Product Boundary
 
 The current documented scope assumes:
@@ -83,6 +98,11 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Pricing and Packaging Brief](docs/pricing-packaging-brief.md)
 - [Marketing Guide](docs/marketing-guide.md)
 - [Go-to-Market Launch Plan](docs/go-to-market-launch-plan.md)
+
+### Brand Assets
+
+- [Logo Concepts](assets/logos/README.md)
+- [Selected Threshold K Logo](assets/logos/kairis-threshold-k.svg)
 
 ## Document Ordering
 

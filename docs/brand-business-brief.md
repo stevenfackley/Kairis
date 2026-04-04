@@ -12,6 +12,7 @@ The core business is not "sell alpha." The business is to sell safer trading ope
 - Pronunciation: `KAI-riss`
 - Root meaning: derived from `kairos`, the right or opportune moment
 - Brand interpretation: not speed for its own sake, but the discipline to act at the right time under defined limits
+- Selected logo direction: `Threshold K`
 
 ## Brand Positioning
 
@@ -24,6 +25,26 @@ The brand should emphasize:
 - visible risk boundaries
 - reliable execution records
 - confidence through clarity, not promises
+
+## Visual Identity Direction
+
+Selected logo concept:
+
+- `Threshold K`
+- reference asset: `assets/logos/kairis-threshold-k.svg`
+
+Meaning:
+
+- the `K` acts as a branded threshold marker
+- the interrupted/gated structure represents controlled transition from signal to execution
+- the visual system should feel closer to an instrument panel than a retail finance app
+
+Primary visual cues:
+
+- deep graphite background
+- muted green signal accent
+- restrained brass highlight
+- sharp geometry with controlled asymmetry
 
 ## Product Identity
 
@@ -110,4 +131,3 @@ Repo naming should remain aligned with the product name even if the public domai
 - users immediately understand the product is about control, not gambling
 - the name can survive expansion beyond crypto-only tooling
 - messaging stays compatible with a more serious compliance posture later
-
