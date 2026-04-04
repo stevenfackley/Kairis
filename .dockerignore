@@ -1,0 +1,14 @@
+.git
+.github
+.next
+node_modules
+.npm-cache
+.local-data
+coverage
+dist
+*.log
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

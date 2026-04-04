@@ -5,6 +5,8 @@ dist/
 .npm-cache/
 *.tsbuildinfo
 .local-data/
+proxmox-data/
+.env.proxmox-test
 
 .env
 .env.local

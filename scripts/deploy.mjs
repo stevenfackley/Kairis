@@ -7,7 +7,7 @@ if (!target) {
 
 const messages = {
   "proxmox-test":
-    "Deployment scaffold complete for Proxmox test. Replace this step with the actual artifact sync or service restart process.",
+    "Deployment scaffold complete for Proxmox test. Use docker compose -f docker-compose.proxmox-test.yml up -d --build on the Proxmox host.",
   "ec2-production":
     "Deployment scaffold complete for EC2 production. Replace this step with the actual SSH, artifact sync, and service reload process."
 };

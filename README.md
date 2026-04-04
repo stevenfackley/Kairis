@@ -122,6 +122,8 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Assisted live trading flow](app/assisted-live/page.tsx)
 - [Operations dashboard](app/operations/page.tsx)
 - [Deployment workflow scaffold](.github/workflows/deploy.yml)
+- [Proxmox test environment guide](docs/proxmox-test-environment.md)
+- [Supabase setup guide](docs/supabase-setup.md)
 
 ## Document Ordering
 
