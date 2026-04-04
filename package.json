@@ -10,17 +10,18 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit"
   },
   "dependencies": {
-    "@coinbase/cdp-sdk": "^1.29.0",
     "@aws-sdk/client-s3": "^3.883.0",
+    "@coinbase/cdp-sdk": "^1.29.0",
+    "@supabase/supabase-js": "^2.49.8",
     "next": "^15.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@supabase/supabase-js": "^2.49.8"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
+    "supabase": "^2.84.10",
     "typescript": "^5.8.3"
   },
   "engines": {

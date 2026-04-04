@@ -6,6 +6,7 @@ dist/
 *.tsbuildinfo
 .local-data/
 proxmox-data/
+supabase/.temp/
 .env.proxmox-test
 
 .env
