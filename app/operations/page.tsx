@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { Phase6OperationsClient } from "@/components/phase6-operations-client";
 import { getPhase4Snapshot } from "@/lib/server/phase4-store";
+import { getSystemStatus } from "@/lib/server/system-status";
 
 export default async function OperationsPage() {
-  const snapshot = await getPhase4Snapshot();
+  const [snapshot, systemStatus] = await Promise.all([
+    getPhase4Snapshot(),
+    getSystemStatus()
+  ]);
 
   return (
     <main className="page-shell">
@@ -37,7 +41,7 @@ export default async function OperationsPage() {
         </article>
       </section>
 
-      <Phase6OperationsClient initialSnapshot={snapshot} />
+      <Phase6OperationsClient initialSnapshot={snapshot} initialStatus={systemStatus} />
 
       <nav className="inline-nav">
         <Link href="/assisted-live">Back to assisted live flow</Link>

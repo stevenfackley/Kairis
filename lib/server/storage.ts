@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const baseDir = path.join(process.cwd(), ".local-data");
+const baseDir = path.join(process.cwd(), process.env.LOCAL_DATA_DIR ?? ".local-data");
 
 async function ensureBaseDir() {
   await mkdir(baseDir, { recursive: true });

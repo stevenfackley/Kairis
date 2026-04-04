@@ -77,8 +77,7 @@ This repository currently exists to:
 - define the user experience and system architecture
 - establish risk and compliance boundaries
 - align pricing, packaging, marketing, and go-to-market strategy
-
-It does not yet contain application code or infrastructure scaffolding.
+- ship the early application shell, local test runtime, and managed-service integration paths
 
 ## Document Map
 
@@ -121,6 +120,7 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Reports and export workspace](app/reports/page.tsx)
 - [Assisted live trading flow](app/assisted-live/page.tsx)
 - [Operations dashboard](app/operations/page.tsx)
+- [System status endpoint](app/api/system/status/route.ts)
 - [Deployment workflow scaffold](.github/workflows/deploy.yml)
 - [Proxmox test environment guide](docs/proxmox-test-environment.md)
 - [Supabase setup guide](docs/supabase-setup.md)
@@ -156,6 +156,8 @@ These decisions should be treated as active defaults unless revised in the docs:
 - `GitHub Actions` is the default CI/CD system
 - the system should prefer managed services over AWS-first infrastructure in the initial phase
 - the application stack should remain light enough to run in local Proxmox-based test environments
+- the app should fall back cleanly to local JSON persistence when Supabase is not configured
+- export artifacts should use `Cloudflare R2` when configured and local storage otherwise
 
 ## Suggested Repo Conventions
 
@@ -179,18 +181,26 @@ Current preferred domain patterns:
 
 The repo name should stay aligned with the product name even if the public domain uses a prefix.
 
+## Current Runtime State
+
+The repository now contains:
+
+- a working Next.js application shell with branded landing and flow pages
+- local-first persistence with optional `Supabase` admin writes
+- export generation with optional `Cloudflare R2` uploads
+- a mock-safe assisted trading path and Coinbase integration surface
+- an operations dashboard and system-status endpoint for readiness checks
+- Docker-based Proxmox test deployment scaffolding
+- CI validation plus deploy workflow scaffolding
+
 ## Next Step
 
-The next implementation phase should translate this documentation package into:
+The next implementation phase should focus on:
 
-- repo structure for application code
-- design system and visual direction
-- exchange integration plan
-- initial onboarding and paper-trading workflows
-- control and logging infrastructure
-- a concrete deployment split between Supabase, application runtime, and R2-backed storage
-- a GitHub Actions pipeline for validation and deployment
-- a clear environment model for local Proxmox test deployments and AWS EC2 production deployments
+- linking the real Supabase project and applying migrations
+- filling deployment secrets for test and production environments
+- validating Docker deployment on the Proxmox host
+- wiring real Coinbase credentials only after the rest of the environment is stable
 
 ## Local Workflow
 

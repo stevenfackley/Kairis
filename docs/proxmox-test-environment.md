@@ -10,6 +10,7 @@ Run Kairis in a Proxmox-hosted test environment using Docker Compose, with local
 - Docker Compose runs the Kairis app container
 - local test data is persisted in `./proxmox-data`
 - Supabase remains the intended managed backend when configured
+- Cloudflare R2 remains the intended export artifact target when configured
 - Coinbase assisted live trading remains disabled in test by default
 
 ## Files
@@ -50,4 +51,5 @@ curl http://localhost:3000/api/health
 
 - `proxmox-data/` is intentionally local and not checked into git.
 - If Supabase is not configured, the app falls back to local JSON persistence.
+- If R2 is not configured, exports are written to local storage.
 - This environment is for validation and beta-style testing, not production.

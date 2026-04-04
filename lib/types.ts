@@ -33,7 +33,13 @@ export type PaperTrade = {
 export type AuditEvent = {
   id: string;
   userId: string;
-  category: "onboarding" | "limits" | "paper-trade" | "export";
+  category:
+    | "onboarding"
+    | "limits"
+    | "paper-trade"
+    | "assisted-order"
+    | "operations"
+    | "export";
   action: string;
   detail: string;
   createdAt: string;

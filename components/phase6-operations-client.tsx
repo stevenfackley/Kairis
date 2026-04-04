@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { Phase4Snapshot } from "@/lib/types";
+import type { SystemStatus } from "@/lib/server/system-status";
 
 type ReconcileResponse = {
   reconciled: number;
@@ -24,11 +25,14 @@ async function postJson<T>(url: string): Promise<T> {
 }
 
 export function Phase6OperationsClient({
-  initialSnapshot
+  initialSnapshot,
+  initialStatus
 }: {
   initialSnapshot: Phase4Snapshot;
+  initialStatus: SystemStatus;
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [status, setStatus] = useState(initialStatus);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -38,7 +42,12 @@ export function Phase6OperationsClient({
       try {
         setError(null);
         setMessage(null);
-        setSnapshot(await getJson<Phase4Snapshot>("/api/phase4/snapshot"));
+        const [nextSnapshot, nextStatus] = await Promise.all([
+          getJson<Phase4Snapshot>("/api/phase4/snapshot"),
+          getJson<SystemStatus>("/api/system/status")
+        ]);
+        setSnapshot(nextSnapshot);
+        setStatus(nextStatus);
       } catch (refreshError) {
         setError(refreshError instanceof Error ? refreshError.message : "Unable to refresh operations view.");
       }
@@ -51,7 +60,12 @@ export function Phase6OperationsClient({
         setError(null);
         const result = await postJson<ReconcileResponse>("/api/phase6/reconcile-orders");
         setMessage(`Reconciled ${result.reconciled} assisted orders.`);
-        setSnapshot(await getJson<Phase4Snapshot>("/api/phase4/snapshot"));
+        const [nextSnapshot, nextStatus] = await Promise.all([
+          getJson<Phase4Snapshot>("/api/phase4/snapshot"),
+          getJson<SystemStatus>("/api/system/status")
+        ]);
+        setSnapshot(nextSnapshot);
+        setStatus(nextStatus);
       } catch (reconcileError) {
         setError(
           reconcileError instanceof Error
@@ -78,6 +92,50 @@ export function Phase6OperationsClient({
       {error ? <p className="error-copy">{error}</p> : null}
 
       <div className="phase4-grid">
+        <article className="panel">
+          <p className="eyebrow">Environment Readiness</p>
+          <div className="status-stack">
+            <div className="status-row">
+              <span>App environment</span>
+              <strong>{status.appEnv}</strong>
+            </div>
+            <div className="status-row">
+              <span>Persistence</span>
+              <strong>{status.storage.persistence}</strong>
+            </div>
+            <div className="status-row">
+              <span>Artifacts</span>
+              <strong>{status.storage.artifacts}</strong>
+            </div>
+            <div className="status-row">
+              <span>Exchange provider</span>
+              <strong>{status.exchangeProvider}</strong>
+            </div>
+            <div className="status-row">
+              <span>Live assisted trading</span>
+              <strong>{status.liveAssistedTradingEnabled ? "enabled" : "disabled"}</strong>
+            </div>
+          </div>
+          <div className="status-stack">
+            <div className="status-row">
+              <span>Supabase public config</span>
+              <strong>{status.services.supabase}</strong>
+            </div>
+            <div className="status-row">
+              <span>Supabase admin config</span>
+              <strong>{status.services.supabaseAdmin}</strong>
+            </div>
+            <div className="status-row">
+              <span>R2 config</span>
+              <strong>{status.services.r2}</strong>
+            </div>
+            <div className="status-row">
+              <span>Coinbase config</span>
+              <strong>{status.services.coinbase}</strong>
+            </div>
+          </div>
+        </article>
+
         <article className="panel">
           <p className="eyebrow">Assisted Order History</p>
           <div className="signal-list">

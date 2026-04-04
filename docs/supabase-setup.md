@@ -4,10 +4,17 @@
 
 The repository now contains a local `supabase/` project skeleton and SQL migration set, but the cloud project is not linked yet.
 
+The application is already prepared to:
+
+- read and write onboarding, limits, paper trades, audit events, exports, and assisted orders through the Supabase admin client when configured
+- fall back to local JSON persistence when Supabase is not configured
+- expose current readiness in the operations dashboard and `/api/system/status`
+
 ## Files
 
 - `supabase/config.toml`
 - `supabase/migrations/20260404_000001_core_phase4_phase5.sql`
+- `supabase/migrations/20260404_000002_operational_consistency.sql`
 
 ## What This Enables
 
@@ -39,7 +46,7 @@ supabase db push
 
 ## Required Tables
 
-The migration currently defines:
+The migrations currently define:
 
 - `onboarding_states`
 - `trading_limits`
@@ -47,6 +54,12 @@ The migration currently defines:
 - `audit_events`
 - `export_artifacts`
 - `assisted_orders`
+
+The second migration also:
+
+- expands audit event categories for assisted-order and operations events
+- adds `user_id` to `assisted_orders`
+- creates a user-scoped assisted-order index
 
 ## App Variables To Fill Later
 
