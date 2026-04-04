@@ -31,3 +31,13 @@ These are rough first-pass SVG concepts for the `Kairis` brand. They are intende
 The selected logo direction for Kairis is `kairis-threshold-k.svg`.
 
 This is now the default source-of-truth concept for further refinement, favicon work, app icon derivation, and brand system expansion.
+
+## Internal Module Use
+
+The non-selected concepts are still intentionally retained:
+
+- `kairis-aperture-mark.svg`
+  - reserve for insight, analytics, reporting, or review surfaces
+
+- `kairis-signal-gate.svg`
+  - reserve for execution, controls, infrastructure, or orchestration surfaces

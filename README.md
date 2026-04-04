@@ -43,6 +43,11 @@ The selected initial logo direction is `Threshold K`.
 
 Alternative concepts remain in the repo for reference, but `Threshold K` is the current source-of-truth direction for branding work.
 
+The secondary logo concepts are intentionally retained for internal module or subsystem branding:
+
+- `Aperture Mark`: candidate for reporting, analytics, or review-oriented modules
+- `Signal Gate`: candidate for execution, orchestration, or control-plane modules
+
 ## Current Product Boundary
 
 The current documented scope assumes:
@@ -103,6 +108,13 @@ It does not yet contain application code or infrastructure scaffolding.
 
 - [Logo Concepts](assets/logos/README.md)
 - [Selected Threshold K Logo](assets/logos/kairis-threshold-k.svg)
+
+### App Scaffold
+
+- [Next.js application shell](app/page.tsx)
+- [Health endpoint](app/api/health/route.ts)
+- [GitHub Actions CI](.github/workflows/ci.yml)
+- [Environment template](.env.example)
 
 ## Document Ordering
 
@@ -170,3 +182,14 @@ The next implementation phase should translate this documentation package into:
 - a concrete deployment split between Supabase, application runtime, and R2-backed storage
 - a GitHub Actions pipeline for validation and deployment
 - a clear environment model for local Proxmox test deployments and AWS EC2 production deployments
+
+## Local Workflow
+
+Local development and release flow should remain:
+
+1. work locally in the repo
+2. validate changes locally
+3. commit on the local branch
+4. push to GitHub
+
+Direct editing in GitHub should be avoided except for emergencies.
