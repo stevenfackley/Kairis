@@ -162,6 +162,7 @@ Infrastructure-specific considerations:
 - keep exchange credentials outside of object storage paths
 - treat R2 as artifact storage, not secret storage
 - use managed platform controls where possible before introducing custom ops overhead
+- use `r2.dev` public URLs only for test or development environments; production artifact delivery should move to a custom domain under the Kairis-controlled DNS surface
 
 ## Non-Functional Requirements
 

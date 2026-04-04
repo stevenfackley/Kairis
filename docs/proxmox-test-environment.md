@@ -52,4 +52,5 @@ curl http://localhost:3000/api/health
 - `proxmox-data/` is intentionally local and not checked into git.
 - If Supabase is not configured, the app falls back to local JSON persistence.
 - If R2 is not configured, exports are written to local storage.
+- `R2_PUBLIC_URL` may use a Cloudflare `r2.dev` development URL for test environments. For production, switch artifact delivery to a custom domain rather than leaving user-facing files on `r2.dev`.
 - This environment is for validation and beta-style testing, not production.
