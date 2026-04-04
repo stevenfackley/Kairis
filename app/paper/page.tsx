@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { Phase4Client } from "@/components/phase4-client";
 import { paperMetrics, paperSignals } from "@/lib/phase3-content";
+import { getPhase4Snapshot } from "@/lib/server/phase4-store";
 
-export default function PaperPage() {
+export default async function PaperPage() {
+  const snapshot = await getPhase4Snapshot();
+
   return (
     <main className="page-shell">
       <section className="page-copy">
@@ -45,9 +49,12 @@ export default function PaperPage() {
         </div>
       </section>
 
+      <Phase4Client initialSnapshot={snapshot} scope="paper" />
+
       <nav className="inline-nav">
         <Link href="/onboarding">Back to onboarding</Link>
         <Link href="/connect-exchange">Continue to exchange setup</Link>
+        <Link href="/reports">Review reports and exports</Link>
       </nav>
     </main>
   );

@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
+import { Phase4Client } from "@/components/phase4-client";
 import { env } from "@/lib/env";
 import { onboardingSteps } from "@/lib/phase3-content";
+import { getPhase4Snapshot } from "@/lib/server/phase4-store";
 
-export default function OnboardingPage() {
+export default async function OnboardingPage() {
+  const snapshot = await getPhase4Snapshot();
+
   return (
     <main className="page-shell">
       <section className="page-hero">
@@ -56,10 +60,13 @@ export default function OnboardingPage() {
         </div>
       </section>
 
+      <Phase4Client initialSnapshot={snapshot} scope="onboarding" />
+
       <nav className="inline-nav">
         <Link href="/">Back to overview</Link>
         <Link href="/paper">Open paper workspace</Link>
         <Link href="/connect-exchange">Review exchange setup</Link>
+        <Link href="/reports">Open reports</Link>
       </nav>
     </main>
   );

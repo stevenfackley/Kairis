@@ -4,6 +4,7 @@ coverage/
 dist/
 .npm-cache/
 *.tsbuildinfo
+.local-data/
 
 .env
 .env.local

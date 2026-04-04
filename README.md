@@ -118,6 +118,7 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Onboarding flow](app/onboarding/page.tsx)
 - [Paper trading workspace](app/paper/page.tsx)
 - [Exchange connection policy view](app/connect-exchange/page.tsx)
+- [Reports and export workspace](app/reports/page.tsx)
 
 ## Document Ordering
 

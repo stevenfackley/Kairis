@@ -52,6 +52,9 @@ export default function HomePage() {
         <Link className="cta-secondary" href="/connect-exchange">
           Review exchange setup
         </Link>
+        <Link className="cta-secondary" href="/reports">
+          Open reports
+        </Link>
       </section>
 
       <section className="grid">

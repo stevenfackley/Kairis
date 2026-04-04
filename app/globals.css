@@ -426,6 +426,35 @@ a {
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+.phase4-stack {
+  display: grid;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.phase4-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.phase4-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.button-reset {
+  cursor: pointer;
+  border: 0;
+}
+
+.error-copy {
+  margin: 0;
+  color: #f2a6a1;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
 @media (max-width: 800px) {
   .hero {
     grid-template-columns: 1fr;
@@ -436,7 +465,8 @@ a {
   .roadmap-list,
   .card-grid,
   .metric-grid,
-  .split-panel {
+  .split-panel,
+  .phase4-grid {
     grid-template-columns: 1fr;
   }
 
