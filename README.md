@@ -115,6 +115,9 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Health endpoint](app/api/health/route.ts)
 - [GitHub Actions CI](.github/workflows/ci.yml)
 - [Environment template](.env.example)
+- [Onboarding flow](app/onboarding/page.tsx)
+- [Paper trading workspace](app/paper/page.tsx)
+- [Exchange connection policy view](app/connect-exchange/page.tsx)
 
 ## Document Ordering
 

@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
+
 const phases = [
   {
     title: "Phase 1",
@@ -26,12 +29,7 @@ export default function HomePage() {
   return (
     <main className="shell">
       <section className="hero">
-        <div className="hero-mark" aria-hidden="true">
-          <div className="hero-mark-stem" />
-          <div className="hero-mark-diagonal hero-mark-diagonal-top" />
-          <div className="hero-mark-diagonal hero-mark-diagonal-bottom" />
-          <div className="hero-mark-gate" />
-        </div>
+        <BrandMark />
 
         <div className="hero-copy">
           <p className="eyebrow">Threshold K</p>
@@ -42,6 +40,18 @@ export default function HomePage() {
             infrastructure that fits the actual operating constraints.
           </p>
         </div>
+      </section>
+
+      <section className="cta-strip">
+        <Link className="cta-primary" href="/onboarding">
+          Start onboarding flow
+        </Link>
+        <Link className="cta-secondary" href="/paper">
+          Open paper workspace
+        </Link>
+        <Link className="cta-secondary" href="/connect-exchange">
+          Review exchange setup
+        </Link>
       </section>
 
       <section className="grid">
