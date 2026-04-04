@@ -14,7 +14,7 @@ The application is already prepared to:
 
 - `supabase/config.toml`
 - `supabase/migrations/20260404_000001_core_phase4_phase5.sql`
-- `supabase/migrations/20260404_000002_operational_consistency.sql`
+- `supabase/migrations/20260404000002_operational_consistency.sql`
 
 ## What This Enables
 
