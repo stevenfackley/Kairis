@@ -72,6 +72,8 @@ export type AssistedOrderRecord = {
   side: "BUY" | "SELL";
   quoteSize: number;
   status: "previewed" | "submitted" | "blocked";
+  reconcileState: "pending" | "reconciled" | "error";
+  reconciledAt: string | null;
   provider: "coinbase" | "mock";
   detail: string;
   createdAt: string;

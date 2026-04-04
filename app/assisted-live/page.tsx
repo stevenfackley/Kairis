@@ -40,6 +40,7 @@ export default function AssistedLivePage() {
 
       <nav className="inline-nav">
         <Link href="/reports">Review reports</Link>
+        <Link href="/operations">Open operations</Link>
         <Link href="/connect-exchange">Back to exchange setup</Link>
         <Link href="/">Return to overview</Link>
       </nav>

@@ -24,6 +24,7 @@ export default async function ReportsPage() {
         <Link href="/onboarding">Back to onboarding</Link>
         <Link href="/paper">Back to paper mode</Link>
         <Link href="/assisted-live">Open assisted live flow</Link>
+        <Link href="/operations">Open operations</Link>
         <Link href="/">Return to overview</Link>
       </nav>
     </main>

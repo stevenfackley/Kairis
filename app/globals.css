@@ -455,6 +455,12 @@ a {
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+.success-copy {
+  margin: 0;
+  color: var(--sage);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
 .provider-detail {
   margin-top: 14px;
 }

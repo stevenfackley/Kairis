@@ -120,6 +120,8 @@ It does not yet contain application code or infrastructure scaffolding.
 - [Exchange connection policy view](app/connect-exchange/page.tsx)
 - [Reports and export workspace](app/reports/page.tsx)
 - [Assisted live trading flow](app/assisted-live/page.tsx)
+- [Operations dashboard](app/operations/page.tsx)
+- [Deployment workflow scaffold](.github/workflows/deploy.yml)
 
 ## Document Ordering
 

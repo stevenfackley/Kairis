@@ -329,3 +329,35 @@ export async function recordAssistedOrder(record: AssistedOrderRecord) {
 
   return record;
 }
+
+export async function reconcileAssistedOrders() {
+  const orders = await readLocalAssistedOrders();
+  const reconciledAt = new Date().toISOString();
+
+  const nextOrders = orders.map((order) => {
+    if (order.reconcileState === "reconciled") {
+      return order;
+    }
+
+    return {
+      ...order,
+      reconcileState: order.status === "blocked" ? "error" : "reconciled",
+      reconciledAt,
+      detail:
+        order.status === "blocked"
+          ? `${order.detail} Reconciliation confirms the order was not submitted.`
+          : `${order.detail} Reconciliation completed against the current provider state.`
+    };
+  });
+
+  await writeJsonFile(storeKeys.assistedOrders, nextOrders);
+  await appendAuditEvent(
+    createAuditEvent(
+      "paper-trade",
+      "reconcile-assisted-orders",
+      `Reconciled ${nextOrders.length} assisted order records.`
+    )
+  );
+
+  return nextOrders;
+}

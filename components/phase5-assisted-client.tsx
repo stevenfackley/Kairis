@@ -38,6 +38,15 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
   const payload = (await response.json()) as T;
   if (!response.ok) {
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in payload &&
+      typeof (payload as { detail?: unknown }).detail === "string"
+    ) {
+      throw new Error((payload as { detail: string }).detail);
+    }
+
     throw new Error(JSON.stringify(payload));
   }
 
