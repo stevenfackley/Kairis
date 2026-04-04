@@ -48,12 +48,42 @@ export type ExportArtifact = {
   createdAt: string;
 };
 
+export type AssistedOrderRequest = {
+  productId: string;
+  side: "BUY" | "SELL";
+  quoteSize: number;
+};
+
+export type AssistedOrderPreview = {
+  provider: "coinbase" | "mock";
+  productId: string;
+  side: "BUY" | "SELL";
+  quoteSize: number;
+  estimatedPrice: number;
+  orderTotal: number;
+  commissionTotal: number;
+  warnings: string[];
+  previewId: string;
+};
+
+export type AssistedOrderRecord = {
+  id: string;
+  productId: string;
+  side: "BUY" | "SELL";
+  quoteSize: number;
+  status: "previewed" | "submitted" | "blocked";
+  provider: "coinbase" | "mock";
+  detail: string;
+  createdAt: string;
+};
+
 export type Phase4Snapshot = {
   onboarding: OnboardingState;
   limits: TradingLimits;
   paperTrades: PaperTrade[];
   auditEvents: AuditEvent[];
   exports: ExportArtifact[];
+  assistedOrders: AssistedOrderRecord[];
   storage: {
     provider: "supabase" | "local";
     artifacts: "r2" | "local";

@@ -55,6 +55,9 @@ export default function HomePage() {
         <Link className="cta-secondary" href="/reports">
           Open reports
         </Link>
+        <Link className="cta-secondary" href="/assisted-live">
+          Assisted live trading
+        </Link>
       </section>
 
       <section className="grid">

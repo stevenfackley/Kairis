@@ -455,6 +455,10 @@ a {
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+.provider-detail {
+  margin-top: 14px;
+}
+
 @media (max-width: 800px) {
   .hero {
     grid-template-columns: 1fr;

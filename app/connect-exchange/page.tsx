@@ -61,6 +61,7 @@ export default function ConnectExchangePage() {
       <nav className="inline-nav">
         <Link href="/paper">Back to paper mode</Link>
         <Link href="/reports">Open reports</Link>
+        <Link href="/assisted-live">Open assisted live flow</Link>
         <Link href="/">Return to overview</Link>
       </nav>
     </main>

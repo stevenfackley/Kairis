@@ -8,6 +8,7 @@ import {
 } from "@/lib/defaults";
 import type {
   AuditEvent,
+  AssistedOrderRecord,
   ExportArtifact,
   OnboardingState,
   PaperTrade,
@@ -22,7 +23,8 @@ const storeKeys = {
   limits: "limits.json",
   trades: "paper-trades.json",
   audits: "audit-events.json",
-  exports: "exports.json"
+  exports: "exports.json",
+  assistedOrders: "assisted-orders.json"
 } as const;
 
 async function readLocalOnboarding() {
@@ -48,6 +50,10 @@ async function readLocalExports() {
   return readJsonFile<ExportArtifact[]>(storeKeys.exports, []);
 }
 
+async function readLocalAssistedOrders() {
+  return readJsonFile<AssistedOrderRecord[]>(storeKeys.assistedOrders, []);
+}
+
 async function appendAuditEvent(event: AuditEvent) {
   const events = await readLocalAudits();
   events.unshift(event);
@@ -55,13 +61,15 @@ async function appendAuditEvent(event: AuditEvent) {
 }
 
 async function getLocalSnapshot(): Promise<Phase4Snapshot> {
-  const [onboarding, limits, paperTrades, auditEvents, exports] = await Promise.all([
+  const [onboarding, limits, paperTrades, auditEvents, exports, assistedOrders] =
+    await Promise.all([
     readLocalOnboarding(),
     readLocalLimits(),
     readLocalTrades(),
     readLocalAudits(),
-    readLocalExports()
-  ]);
+    readLocalExports(),
+    readLocalAssistedOrders()
+    ]);
 
   return {
     onboarding,
@@ -69,6 +77,7 @@ async function getLocalSnapshot(): Promise<Phase4Snapshot> {
     paperTrades,
     auditEvents,
     exports,
+    assistedOrders,
     storage: {
       provider: "local",
       artifacts: env.r2Configured ? "r2" : "local"
@@ -170,6 +179,7 @@ async function getSupabaseSnapshot(): Promise<Phase4Snapshot | null> {
         location: artifact.location,
         createdAt: artifact.created_at
       })) ?? [],
+    assistedOrders: [],
     storage: {
       provider: "supabase",
       artifacts: env.r2Configured ? "r2" : "local"
@@ -303,4 +313,19 @@ export async function createPaperJournalExport() {
   );
 
   return artifact;
+}
+
+export async function recordAssistedOrder(record: AssistedOrderRecord) {
+  const orders = await readLocalAssistedOrders();
+  orders.unshift(record);
+  await writeJsonFile(storeKeys.assistedOrders, orders.slice(0, 30));
+  await appendAuditEvent(
+    createAuditEvent(
+      "paper-trade",
+      "assisted-order",
+      `${record.status.toUpperCase()} ${record.side} ${record.productId} via ${record.provider}.`
+    )
+  );
+
+  return record;
 }
