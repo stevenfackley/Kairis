@@ -64,7 +64,7 @@ Kairis should use existing managed infrastructure where it reduces operational b
 
 Initial infrastructure assumptions:
 
-- `Supabase Pro` is the default backend platform for database, auth, and core managed application data
+- `Neon Postgres` is the default backend platform for relational data and core managed application state
 - `Cloudflare R2` is the preferred object storage layer for exports, artifacts, and other file-oriented outputs
 - local `Proxmox` is the intended platform for test environments
 - only `AWS EC2` is assumed to be available from AWS, and it is the intended production hosting target

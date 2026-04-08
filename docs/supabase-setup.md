@@ -1,52 +1,61 @@
-# Supabase Setup
+# Managed Postgres Setup
 
 ## Current State
 
-The repository now contains a local `supabase/` project skeleton and SQL migration set, but the cloud project is not linked yet.
+The repository contains reusable SQL migrations under `supabase/migrations/`, but the application runtime now targets a generic managed Postgres connection instead of the Supabase client path.
 
-The application is already prepared to:
+The app is prepared to:
 
-- read and write onboarding, limits, paper trades, audit events, exports, and assisted orders through the Supabase admin client when configured
-- fall back to local JSON persistence when Supabase is not configured
+- read and write onboarding, limits, paper trades, audit events, exports, and assisted orders through a server-side Postgres connection when configured
+- fall back to local JSON persistence when `DATABASE_URL` is not configured
 - expose current readiness in the operations dashboard and `/api/system/status`
 
 ## Files
 
-- `supabase/config.toml`
-- `supabase/migrations/20260404_000001_core_phase4_phase5.sql`
+- `supabase/migrations/20260404000001_core_phase4_phase5.sql`
 - `supabase/migrations/20260404000002_operational_consistency.sql`
+- `.env.example`
+- `.env.proxmox-test.example`
 
 ## What This Enables
 
-- a consistent local schema definition in repo
-- later use of `supabase link`
-- later use of `supabase db push`
-- alignment between the app data model and the managed backend
+- a consistent SQL schema definition in the repo
+- application portability across Neon, Supabase Postgres, or another managed Postgres host
+- a single `DATABASE_URL` contract for local development, Proxmox test, and GitHub deployment
 
-## Recommended Next Steps
+## Neon Setup
 
-1. Install the Supabase CLI locally.
-2. Log in:
+1. Create or choose the Neon project and branch you want Kairis to use.
+2. Copy the Neon connection string.
+3. Set these values:
 
 ```bash
-supabase login
+DATABASE_PROVIDER=neon
+DATABASE_URL=<your-neon-connection-string>
 ```
 
-3. Link the project after you create it:
+4. Apply the repo SQL migrations to that database using either:
+
+- the Neon SQL editor
+- `psql`
+- the repo helper script `npm run db:migrate`
+
+Example with `psql`:
 
 ```bash
-supabase link --project-ref <your-project-ref>
+psql "$DATABASE_URL" -f supabase/migrations/20260404000001_core_phase4_phase5.sql
+psql "$DATABASE_URL" -f supabase/migrations/20260404000002_operational_consistency.sql
 ```
 
-4. Push the schema:
+Example with the repo helper:
 
 ```bash
-supabase db push
+DATABASE_URL=<your-neon-connection-string> npm run db:migrate
 ```
 
 ## Required Tables
 
-The migrations currently define:
+The migrations define:
 
 - `onboarding_states`
 - `trading_limits`
@@ -61,10 +70,9 @@ The second migration also:
 - adds `user_id` to `assisted_orders`
 - creates a user-scoped assisted-order index
 
-## App Variables To Fill Later
+## Runtime Variables
 
-When the project exists, set:
+Use these environment variables for the active managed Postgres path:
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_PROVIDER`
+- `DATABASE_URL`

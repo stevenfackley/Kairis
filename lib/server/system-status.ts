@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { createSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { getDatabasePool } from "@/lib/server/database";
 
 export type SystemStatus = {
   app: string;
@@ -7,19 +7,19 @@ export type SystemStatus = {
   exchangeProvider: string;
   liveAssistedTradingEnabled: boolean;
   storage: {
-    persistence: "supabase" | "local";
+    persistence: "postgres" | "local";
     artifacts: "r2" | "local";
   };
   services: {
-    supabase: "configured" | "missing";
-    supabaseAdmin: "configured" | "missing";
+    database: "configured" | "missing";
+    databaseProvider: string;
     r2: "configured" | "missing";
     coinbase: "configured" | "missing";
   };
 };
 
 export function getSystemStatus(): SystemStatus {
-  const supabaseAdmin = createSupabaseAdminClient();
+  const database = getDatabasePool();
 
   return {
     app: env.appName,
@@ -27,12 +27,12 @@ export function getSystemStatus(): SystemStatus {
     exchangeProvider: env.exchangeProvider,
     liveAssistedTradingEnabled: env.assistedLiveTradingEnabled,
     storage: {
-      persistence: supabaseAdmin ? "supabase" : "local",
+      persistence: database ? "postgres" : "local",
       artifacts: env.r2Configured ? "r2" : "local"
     },
     services: {
-      supabase: env.supabaseConfigured ? "configured" : "missing",
-      supabaseAdmin: supabaseAdmin ? "configured" : "missing",
+      database: env.databaseConfigured ? "configured" : "missing",
+      databaseProvider: env.databaseProvider,
       r2: env.r2Configured ? "configured" : "missing",
       coinbase:
         Boolean(process.env.COINBASE_API_KEY_ID) &&

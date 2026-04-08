@@ -118,12 +118,12 @@ export function Phase6OperationsClient({
           </div>
           <div className="status-stack">
             <div className="status-row">
-              <span>Supabase public config</span>
-              <strong>{status.services.supabase}</strong>
+              <span>Database config</span>
+              <strong>{status.services.database}</strong>
             </div>
             <div className="status-row">
-              <span>Supabase admin config</span>
-              <strong>{status.services.supabaseAdmin}</strong>
+              <span>Database provider</span>
+              <strong>{status.services.databaseProvider}</strong>
             </div>
             <div className="status-row">
               <span>R2 config</span>

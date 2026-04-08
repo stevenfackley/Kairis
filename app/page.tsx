@@ -18,7 +18,7 @@ const phases = [
 
 const stack = [
   "Next.js App Router",
-  "Supabase Pro",
+  "Neon Postgres",
   "Cloudflare R2",
   "GitHub Actions",
   "Proxmox test environments",

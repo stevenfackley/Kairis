@@ -93,7 +93,7 @@ export type Phase4Snapshot = {
   exports: ExportArtifact[];
   assistedOrders: AssistedOrderRecord[];
   storage: {
-    provider: "supabase" | "local";
+    provider: "postgres" | "local";
     artifacts: "r2" | "local";
   };
 };

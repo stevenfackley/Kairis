@@ -12,8 +12,8 @@ export default async function ReportsPage() {
         <h1>Persistence, Audit, and Export Layer</h1>
         <p className="lede">
           This layer introduces persisted onboarding state, persisted paper
-          journal activity, audit events, and export artifacts. Supabase is the
-          intended production path; local JSON storage remains the fallback for
+          journal activity, audit events, and export artifacts. Managed
+          Postgres is the intended production path; local JSON storage remains the fallback for
           development and test environments.
         </p>
       </section>

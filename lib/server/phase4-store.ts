@@ -17,7 +17,7 @@ import type {
 } from "@/lib/types";
 import { writeArtifactFile, readJsonFile, writeJsonFile } from "@/lib/server/storage";
 import { uploadArtifactToR2 } from "@/lib/server/r2";
-import { createSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { getDatabasePool } from "@/lib/server/database";
 
 const storeKeys = {
   onboarding: "onboarding.json",
@@ -56,17 +56,14 @@ async function readLocalAssistedOrders() {
 }
 
 async function appendAuditEvent(event: AuditEvent) {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
 
-  if (supabase) {
-    await supabase.from("audit_events").insert({
-      id: event.id,
-      user_id: event.userId,
-      category: event.category,
-      action: event.action,
-      detail: event.detail,
-      created_at: event.createdAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.audit_events (id, user_id, category, action, detail, created_at)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [event.id, event.userId, event.category, event.action, event.detail, event.createdAt]
+    );
 
     return;
   }
@@ -101,109 +98,93 @@ async function getLocalSnapshot(): Promise<Phase4Snapshot> {
   };
 }
 
-async function getSupabaseSnapshot(): Promise<Phase4Snapshot | null> {
-  const supabase = createSupabaseAdminClient();
-  if (!supabase) {
+async function getDatabaseSnapshot(): Promise<Phase4Snapshot | null> {
+  const database = getDatabasePool();
+  if (!database) {
     return null;
   }
 
-  const [
-    onboardingResult,
-    limitsResult,
-    tradesResult,
-    auditsResult,
-    exportsResult,
-    assistedOrdersResult
-  ] = await Promise.all([
-    supabase.from("onboarding_states").select("*").eq("user_id", demoUserId).maybeSingle(),
-    supabase.from("trading_limits").select("*").eq("user_id", demoUserId).maybeSingle(),
-    supabase
-      .from("paper_trades")
-      .select("*")
-      .eq("user_id", demoUserId)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("audit_events")
-      .select("*")
-      .eq("user_id", demoUserId)
-      .order("created_at", { ascending: false })
-      .limit(50),
-    supabase
-      .from("export_artifacts")
-      .select("*")
-      .eq("user_id", demoUserId)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("assisted_orders")
-      .select("*")
-      .eq("user_id", demoUserId)
-      .order("created_at", { ascending: false })
-  ]);
+  try {
+    const [
+      onboardingResult,
+      limitsResult,
+      tradesResult,
+      auditsResult,
+      exportsResult,
+      assistedOrdersResult
+    ] = await Promise.all([
+      database.query("select * from public.onboarding_states where user_id = $1 limit 1", [demoUserId]),
+      database.query("select * from public.trading_limits where user_id = $1 limit 1", [demoUserId]),
+      database.query(
+        "select * from public.paper_trades where user_id = $1 order by created_at desc",
+        [demoUserId]
+      ),
+      database.query(
+        "select * from public.audit_events where user_id = $1 order by created_at desc limit 50",
+        [demoUserId]
+      ),
+      database.query(
+        "select * from public.export_artifacts where user_id = $1 order by created_at desc",
+        [demoUserId]
+      ),
+      database.query(
+        "select * from public.assisted_orders where user_id = $1 order by created_at desc",
+        [demoUserId]
+      )
+    ]);
 
-  if (
-    onboardingResult.error ||
-    limitsResult.error ||
-    tradesResult.error ||
-    auditsResult.error ||
-    exportsResult.error ||
-    assistedOrdersResult.error
-  ) {
-    return null;
-  }
+    const onboardingRow = onboardingResult.rows[0];
+    const limitsRow = limitsResult.rows[0];
 
-  return {
-    onboarding: onboardingResult.data
-      ? {
-          userId: onboardingResult.data.user_id,
-          preferredMode: onboardingResult.data.preferred_mode,
-          riskAcknowledged: onboardingResult.data.risk_acknowledged,
-          exchangeConnected: onboardingResult.data.exchange_connected,
-          completedAt: onboardingResult.data.completed_at,
-          updatedAt: onboardingResult.data.updated_at
-        }
-      : getDefaultOnboardingState(),
-    limits: limitsResult.data
-      ? {
-          userId: limitsResult.data.user_id,
-          maxPositionUsd: limitsResult.data.max_position_usd,
-          dailyLossCapUsd: limitsResult.data.daily_loss_cap_usd,
-          maxTradesPerDay: limitsResult.data.max_trades_per_day,
-          cooldownMinutes: limitsResult.data.cooldown_minutes,
-          updatedAt: limitsResult.data.updated_at
-        }
-      : getDefaultTradingLimits(),
-    paperTrades:
-      tradesResult.data?.map((trade) => ({
+    return {
+      onboarding: onboardingRow
+        ? {
+            userId: onboardingRow.user_id,
+            preferredMode: onboardingRow.preferred_mode,
+            riskAcknowledged: onboardingRow.risk_acknowledged,
+            exchangeConnected: onboardingRow.exchange_connected,
+            completedAt: onboardingRow.completed_at,
+            updatedAt: onboardingRow.updated_at
+          }
+        : getDefaultOnboardingState(),
+      limits: limitsRow
+        ? {
+            userId: limitsRow.user_id,
+            maxPositionUsd: Number(limitsRow.max_position_usd),
+            dailyLossCapUsd: Number(limitsRow.daily_loss_cap_usd),
+            maxTradesPerDay: limitsRow.max_trades_per_day,
+            cooldownMinutes: limitsRow.cooldown_minutes,
+            updatedAt: limitsRow.updated_at
+          }
+        : getDefaultTradingLimits(),
+      paperTrades: tradesResult.rows.map((trade) => ({
         id: trade.id,
         userId: trade.user_id,
         symbol: trade.symbol,
         side: trade.side,
-        quantity: trade.quantity,
-        entryPrice: trade.entry_price,
+        quantity: Number(trade.quantity),
+        entryPrice: Number(trade.entry_price),
         status: trade.status,
         note: trade.note,
         createdAt: trade.created_at
-      })) ?? [],
-    auditEvents:
-      auditsResult.data?.map((event) => ({
+      })),
+      auditEvents: auditsResult.rows.map((event) => ({
         id: event.id,
         userId: event.user_id,
         category: event.category,
         action: event.action,
         detail: event.detail,
         createdAt: event.created_at
-      })) ?? [],
-    exports:
-      exportsResult.data?.map((artifact) => ({
+      })),
+      exports: exportsResult.rows.map((artifact) => ({
         id: artifact.id,
         userId: artifact.user_id,
         type: artifact.type,
         storage: artifact.storage,
         location: artifact.location,
         createdAt: artifact.created_at
-      })) ?? [],
-    assistedOrders:
-      assistedOrdersResult.data?.map((order) => ({
+      })),
+      assistedOrders: assistedOrdersResult.rows.map((order) => ({
         id: order.id,
         productId: order.product_id,
         side: order.side,
@@ -214,16 +195,19 @@ async function getSupabaseSnapshot(): Promise<Phase4Snapshot | null> {
         provider: order.provider,
         detail: order.detail,
         createdAt: order.created_at
-      })) ?? [],
-    storage: {
-      provider: "supabase",
-      artifacts: env.r2Configured ? "r2" : "local"
-    }
-  };
+      })),
+      storage: {
+        provider: "postgres",
+        artifacts: env.r2Configured ? "r2" : "local"
+      }
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getPhase4Snapshot(): Promise<Phase4Snapshot> {
-  const snapshot = await getSupabaseSnapshot();
+  const snapshot = await getDatabaseSnapshot();
   if (snapshot) {
     return snapshot;
   }
@@ -247,7 +231,7 @@ export async function saveOnboardingState(
     "preferredMode" | "riskAcknowledged" | "exchangeConnected"
   >
 ) {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
   const timestamp = new Date().toISOString();
   const completedAt = input.riskAcknowledged ? timestamp : null;
   const nextState: OnboardingState = {
@@ -259,15 +243,26 @@ export async function saveOnboardingState(
     updatedAt: timestamp
   };
 
-  if (supabase) {
-    await supabase.from("onboarding_states").upsert({
-      user_id: nextState.userId,
-      preferred_mode: nextState.preferredMode,
-      risk_acknowledged: nextState.riskAcknowledged,
-      exchange_connected: nextState.exchangeConnected,
-      completed_at: nextState.completedAt,
-      updated_at: nextState.updatedAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.onboarding_states (
+         user_id, preferred_mode, risk_acknowledged, exchange_connected, completed_at, updated_at
+       ) values ($1, $2, $3, $4, $5, $6)
+       on conflict (user_id) do update set
+         preferred_mode = excluded.preferred_mode,
+         risk_acknowledged = excluded.risk_acknowledged,
+         exchange_connected = excluded.exchange_connected,
+         completed_at = excluded.completed_at,
+         updated_at = excluded.updated_at`,
+      [
+        nextState.userId,
+        nextState.preferredMode,
+        nextState.riskAcknowledged,
+        nextState.exchangeConnected,
+        nextState.completedAt,
+        nextState.updatedAt
+      ]
+    );
   } else {
     await writeJsonFile(storeKeys.onboarding, nextState);
   }
@@ -286,22 +281,33 @@ export async function saveOnboardingState(
 export async function saveTradingLimits(
   input: Omit<TradingLimits, "userId" | "updatedAt">
 ) {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
   const nextLimits: TradingLimits = {
     userId: demoUserId,
     ...input,
     updatedAt: new Date().toISOString()
   };
 
-  if (supabase) {
-    await supabase.from("trading_limits").upsert({
-      user_id: nextLimits.userId,
-      max_position_usd: nextLimits.maxPositionUsd,
-      daily_loss_cap_usd: nextLimits.dailyLossCapUsd,
-      max_trades_per_day: nextLimits.maxTradesPerDay,
-      cooldown_minutes: nextLimits.cooldownMinutes,
-      updated_at: nextLimits.updatedAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.trading_limits (
+         user_id, max_position_usd, daily_loss_cap_usd, max_trades_per_day, cooldown_minutes, updated_at
+       ) values ($1, $2, $3, $4, $5, $6)
+       on conflict (user_id) do update set
+         max_position_usd = excluded.max_position_usd,
+         daily_loss_cap_usd = excluded.daily_loss_cap_usd,
+         max_trades_per_day = excluded.max_trades_per_day,
+         cooldown_minutes = excluded.cooldown_minutes,
+         updated_at = excluded.updated_at`,
+      [
+        nextLimits.userId,
+        nextLimits.maxPositionUsd,
+        nextLimits.dailyLossCapUsd,
+        nextLimits.maxTradesPerDay,
+        nextLimits.cooldownMinutes,
+        nextLimits.updatedAt
+      ]
+    );
   } else {
     await writeJsonFile(storeKeys.limits, nextLimits);
   }
@@ -320,7 +326,7 @@ export async function saveTradingLimits(
 export async function addPaperTrade(
   input: Omit<PaperTrade, "id" | "userId" | "createdAt">
 ) {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
   const trade: PaperTrade = {
     id: crypto.randomUUID(),
     userId: demoUserId,
@@ -328,18 +334,23 @@ export async function addPaperTrade(
     createdAt: new Date().toISOString()
   };
 
-  if (supabase) {
-    await supabase.from("paper_trades").insert({
-      id: trade.id,
-      user_id: trade.userId,
-      symbol: trade.symbol,
-      side: trade.side,
-      quantity: trade.quantity,
-      entry_price: trade.entryPrice,
-      status: trade.status,
-      note: trade.note,
-      created_at: trade.createdAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.paper_trades (
+         id, user_id, symbol, side, quantity, entry_price, status, note, created_at
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        trade.id,
+        trade.userId,
+        trade.symbol,
+        trade.side,
+        trade.quantity,
+        trade.entryPrice,
+        trade.status,
+        trade.note,
+        trade.createdAt
+      ]
+    );
   } else {
     const trades = await readLocalTrades();
     trades.unshift(trade);
@@ -358,7 +369,7 @@ export async function addPaperTrade(
 }
 
 export async function createPaperJournalExport() {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
   const trades = await getCurrentPaperTrades();
   const csvLines = [
     "id,symbol,side,quantity,entryPrice,status,note,createdAt",
@@ -393,15 +404,20 @@ export async function createPaperJournalExport() {
     createdAt: new Date().toISOString()
   };
 
-  if (supabase) {
-    await supabase.from("export_artifacts").insert({
-      id: artifact.id,
-      user_id: artifact.userId,
-      type: artifact.type,
-      storage: artifact.storage,
-      location: artifact.location,
-      created_at: artifact.createdAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.export_artifacts (
+         id, user_id, type, storage, location, created_at
+       ) values ($1, $2, $3, $4, $5, $6)`,
+      [
+        artifact.id,
+        artifact.userId,
+        artifact.type,
+        artifact.storage,
+        artifact.location,
+        artifact.createdAt
+      ]
+    );
   } else {
     const artifacts = await readLocalExports();
     artifacts.unshift(artifact);
@@ -420,22 +436,38 @@ export async function createPaperJournalExport() {
 }
 
 export async function recordAssistedOrder(record: AssistedOrderRecord) {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
 
-  if (supabase) {
-    await supabase.from("assisted_orders").upsert({
-      id: record.id,
-      user_id: demoUserId,
-      product_id: record.productId,
-      side: record.side,
-      quote_size: record.quoteSize,
-      status: record.status,
-      reconcile_state: record.reconcileState,
-      reconciled_at: record.reconciledAt,
-      provider: record.provider,
-      detail: record.detail,
-      created_at: record.createdAt
-    });
+  if (database) {
+    await database.query(
+      `insert into public.assisted_orders (
+         id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, created_at
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       on conflict (id) do update set
+         user_id = excluded.user_id,
+         product_id = excluded.product_id,
+         side = excluded.side,
+         quote_size = excluded.quote_size,
+         status = excluded.status,
+         reconcile_state = excluded.reconcile_state,
+         reconciled_at = excluded.reconciled_at,
+         provider = excluded.provider,
+         detail = excluded.detail,
+         created_at = excluded.created_at`,
+      [
+        record.id,
+        demoUserId,
+        record.productId,
+        record.side,
+        record.quoteSize,
+        record.status,
+        record.reconcileState,
+        record.reconciledAt,
+        record.provider,
+        record.detail,
+        record.createdAt
+      ]
+    );
   } else {
     const orders = await readLocalAssistedOrders();
     orders.unshift(record);
@@ -454,7 +486,7 @@ export async function recordAssistedOrder(record: AssistedOrderRecord) {
 }
 
 export async function reconcileAssistedOrders() {
-  const supabase = createSupabaseAdminClient();
+  const database = getDatabasePool();
   const orders = await getCurrentAssistedOrders();
   const reconciledAt = new Date().toISOString();
 
@@ -474,21 +506,37 @@ export async function reconcileAssistedOrders() {
     };
   });
 
-  if (supabase) {
+  if (database) {
     for (const order of nextOrders) {
-      await supabase.from("assisted_orders").upsert({
-        id: order.id,
-        user_id: demoUserId,
-        product_id: order.productId,
-        side: order.side,
-        quote_size: order.quoteSize,
-        status: order.status,
-        reconcile_state: order.reconcileState,
-        reconciled_at: order.reconciledAt,
-        provider: order.provider,
-        detail: order.detail,
-        created_at: order.createdAt
-      });
+      await database.query(
+        `insert into public.assisted_orders (
+           id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, created_at
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         on conflict (id) do update set
+           user_id = excluded.user_id,
+           product_id = excluded.product_id,
+           side = excluded.side,
+           quote_size = excluded.quote_size,
+           status = excluded.status,
+           reconcile_state = excluded.reconcile_state,
+           reconciled_at = excluded.reconciled_at,
+           provider = excluded.provider,
+           detail = excluded.detail,
+           created_at = excluded.created_at`,
+        [
+          order.id,
+          demoUserId,
+          order.productId,
+          order.side,
+          order.quoteSize,
+          order.status,
+          order.reconcileState,
+          order.reconciledAt,
+          order.provider,
+          order.detail,
+          order.createdAt
+        ]
+      );
     }
   } else {
     await writeJsonFile(storeKeys.assistedOrders, nextOrders);

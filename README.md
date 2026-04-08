@@ -123,7 +123,7 @@ This repository currently exists to:
 - [System status endpoint](app/api/system/status/route.ts)
 - [Deployment workflow scaffold](.github/workflows/deploy.yml)
 - [Proxmox test environment guide](docs/proxmox-test-environment.md)
-- [Supabase setup guide](docs/supabase-setup.md)
+- [Managed Postgres setup guide](docs/supabase-setup.md)
 
 ## Document Ordering
 
@@ -149,14 +149,14 @@ These decisions should be treated as active defaults unless revised in the docs:
 - paper mode is the safest default starting experience
 - public value is centered on control and safer execution, not promises of profit
 - public unattended automation is not part of the initial launch posture
-- `Supabase Pro` is the default managed backend foundation
+- `Neon Postgres` is the default managed backend foundation
 - `Cloudflare R2` is the default object storage layer for exports and durable artifacts
 - local `Proxmox` will be used for test environments
 - only `AWS EC2` is assumed to be available from AWS, and it is the intended production hosting path
 - `GitHub Actions` is the default CI/CD system
 - the system should prefer managed services over AWS-first infrastructure in the initial phase
 - the application stack should remain light enough to run in local Proxmox-based test environments
-- the app should fall back cleanly to local JSON persistence when Supabase is not configured
+- the app should fall back cleanly to local JSON persistence when managed Postgres is not configured
 - export artifacts should use `Cloudflare R2` when configured and local storage otherwise
 
 ## Suggested Repo Conventions
@@ -186,7 +186,7 @@ The repo name should stay aligned with the product name even if the public domai
 The repository now contains:
 
 - a working Next.js application shell with branded landing and flow pages
-- local-first persistence with optional `Supabase` admin writes
+- local-first persistence with optional managed `Postgres` writes
 - export generation with optional `Cloudflare R2` uploads
 - a mock-safe assisted trading path and Coinbase integration surface
 - an operations dashboard and system-status endpoint for readiness checks
@@ -197,8 +197,8 @@ The repository now contains:
 
 The next implementation phase should focus on:
 
-- linking the real Supabase project and applying migrations
-- filling deployment secrets for test and production environments
+- wiring the active `Neon` connection string into local, test, and GitHub deployment secrets
+- applying the repo SQL migrations to the Neon branch or database
 - validating Docker deployment on the Proxmox host
 - wiring real Coinbase credentials only after the rest of the environment is stable
 

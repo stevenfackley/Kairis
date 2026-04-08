@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { createSupabaseBrowserClient } from "@/lib/supabase";
+import { env } from "@/lib/env";
 import { exchangePolicies } from "@/lib/phase3-content";
 
 export default function ConnectExchangePage() {
-  const supabaseReady = Boolean(createSupabaseBrowserClient());
+  const databaseReady = env.databaseConfigured;
 
   return (
     <main className="page-shell">
@@ -35,8 +35,8 @@ export default function ConnectExchangePage() {
               <strong>CEX Spot</strong>
             </div>
             <div className="status-row">
-              <span>Supabase storage path</span>
-              <strong>{supabaseReady ? "Ready to wire" : "Needs env values"}</strong>
+              <span>Managed Postgres path</span>
+              <strong>{databaseReady ? "Ready to wire" : "Needs env values"}</strong>
             </div>
             <div className="status-row">
               <span>Live execution state</span>
@@ -54,7 +54,7 @@ export default function ConnectExchangePage() {
         <p className="panel-copy">
           The next implementation layer should persist onboarding state,
           connected accounts, user limits, and paper-trading journal data in
-          Supabase, then add audit logging and export-ready reporting.
+          managed Postgres, then add audit logging and export-ready reporting.
         </p>
       </section>
 

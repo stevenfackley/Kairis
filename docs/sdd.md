@@ -20,7 +20,7 @@ Primary subsystems:
 
 The initial system design should reflect available infrastructure:
 
-- `Supabase Pro` is the default managed backend for authentication, relational data, and operational records
+- `Neon Postgres` is the default managed backend for relational data and operational records
 - `Cloudflare R2` is the default object storage layer for exports, generated reports, and file-like artifacts
 - local `Proxmox` is the intended host for test environments
 - only `AWS EC2` is assumed to be available from AWS, and it is the intended production deployment target
@@ -67,7 +67,7 @@ Critical rule:
 
 Implementation assumption:
 
-- user identity, entitlements, and account metadata should live in Supabase-managed data stores unless later requirements force separation
+- user identity, entitlements, and account metadata should live in managed Postgres-backed data stores unless later requirements force separation
 
 ### Exchange Integration Layer
 
@@ -114,7 +114,7 @@ Responsibilities:
 
 Implementation assumption:
 
-- structured operational records should live in Supabase
+- structured operational records should live in managed Postgres
 - file-based exports and generated artifacts should be stored in Cloudflare R2
 
 ## Execution Flow By Mode

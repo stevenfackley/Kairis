@@ -13,9 +13,8 @@ on:
           - ec2-production
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.target == 'ec2-production' && 'production' || 'test' }}
 
     steps:
       - name: Checkout
@@ -36,5 +35,80 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Deployment scaffold
-        run: node scripts/deploy.mjs "${{ inputs.target }}"
+      - name: Validate Proxmox deployment inputs
+        if: ${{ inputs.target == 'proxmox-test' }}
+        run: |
+          test -f docker-compose.proxmox-test.yml
+          test -f Dockerfile
+          test -f .env.proxmox-test.example
+
+  deploy-proxmox-test:
+    if: ${{ inputs.target == 'proxmox-test' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: test
+
+    steps:
+      - name: Deploy to Proxmox test host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROXMOX_HOST }}
+          username: ${{ secrets.PROXMOX_USER }}
+          key: ${{ secrets.PROXMOX_SSH_KEY }}
+          port: ${{ secrets.PROXMOX_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -eu
+
+            APP_DIR="${{ secrets.PROXMOX_APP_DIR }}"
+            BRANCH="${{ github.ref_name }}"
+
+            if [ -z "$APP_DIR" ]; then
+              echo "Missing PROXMOX_APP_DIR secret."
+              exit 1
+            fi
+
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            if [ ! -d .git ]; then
+              echo "Expected an existing git checkout at $APP_DIR."
+              exit 1
+            fi
+
+            command -v git >/dev/null 2>&1 || { echo "git is required on the host."; exit 1; }
+            command -v docker >/dev/null 2>&1 || { echo "docker is required on the host."; exit 1; }
+
+            git fetch --all --prune
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+
+            cat > .env.proxmox-test <<'EOF'
+            ${{ secrets.PROXMOX_TEST_ENV_FILE }}
+            EOF
+
+            if [ ! -s .env.proxmox-test ]; then
+              echo ".env.proxmox-test was not written."
+              exit 1
+            fi
+
+            mkdir -p proxmox-data
+
+            docker compose -f docker-compose.proxmox-test.yml up -d --build
+            docker compose -f docker-compose.proxmox-test.yml ps
+
+            curl --fail --silent --show-error http://127.0.0.1:3000/api/health
+            curl --fail --silent --show-error http://127.0.0.1:3000/api/system/status
+
+  deploy-ec2-production:
+    if: ${{ inputs.target == 'ec2-production' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Production deployment not yet wired
+        run: |
+          echo "The ec2-production deployment path is not implemented yet."
+          echo "Use the proxmox-test target for the active deployment workflow."
+          exit 1

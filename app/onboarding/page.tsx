@@ -39,8 +39,8 @@ export default async function OnboardingPage() {
           <p className="eyebrow">Configuration</p>
           <h2>Environment Readiness</h2>
           <p className="panel-copy">
-            Supabase wiring is scaffolded now so onboarding can evolve into real
-            authentication and account persistence without a route rewrite.
+            Managed Postgres wiring is scaffolded now so onboarding can evolve
+            into real account persistence without a route rewrite.
           </p>
         </div>
 
@@ -54,8 +54,8 @@ export default async function OnboardingPage() {
             <strong>{env.appEnv}</strong>
           </div>
           <div className="status-row">
-            <span>Supabase</span>
-            <strong>{env.supabaseConfigured ? "Configured" : "Not configured"}</strong>
+            <span>Database</span>
+            <strong>{env.databaseConfigured ? "Configured" : "Not configured"}</strong>
           </div>
         </div>
       </section>
