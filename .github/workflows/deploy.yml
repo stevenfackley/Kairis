@@ -49,6 +49,22 @@ jobs:
     environment: test
 
     steps:
+      - name: Validate Proxmox deployment secrets
+        env:
+          PROXMOX_HOST: ${{ secrets.PROXMOX_HOST }}
+          PROXMOX_USER: ${{ secrets.PROXMOX_USER }}
+          PROXMOX_SSH_KEY: ${{ secrets.PROXMOX_SSH_KEY }}
+          PROXMOX_APP_DIR: ${{ secrets.PROXMOX_APP_DIR }}
+          PROXMOX_TEST_ENV_FILE: ${{ secrets.PROXMOX_TEST_ENV_FILE }}
+        run: |
+          set -eu
+
+          test -n "$PROXMOX_HOST" || { echo "Missing PROXMOX_HOST secret."; exit 1; }
+          test -n "$PROXMOX_USER" || { echo "Missing PROXMOX_USER secret."; exit 1; }
+          test -n "$PROXMOX_SSH_KEY" || { echo "Missing PROXMOX_SSH_KEY secret."; exit 1; }
+          test -n "$PROXMOX_APP_DIR" || { echo "Missing PROXMOX_APP_DIR secret."; exit 1; }
+          test -n "$PROXMOX_TEST_ENV_FILE" || { echo "Missing PROXMOX_TEST_ENV_FILE secret."; exit 1; }
+
       - name: Deploy to Proxmox test host
         uses: appleboy/ssh-action@v1.0.3
         with:
