@@ -14,7 +14,7 @@ const databaseUrl =
 export const env = {
   ...requiredPublicEnv,
   databaseUrl,
-  databaseProvider: process.env.DATABASE_PROVIDER ?? (databaseUrl ? "neon" : "local"),
+  databaseProvider: process.env.DATABASE_PROVIDER ?? (databaseUrl ? "supabase" : "local"),
   exchangeProvider: process.env.EXCHANGE_PROVIDER ?? "mock",
   assistedLiveTradingEnabled: process.env.ENABLE_LIVE_ASSISTED_TRADING === "true",
   databaseConfigured: databaseUrl.length > 0,

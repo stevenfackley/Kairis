@@ -24,7 +24,7 @@ console.log("   curl http://localhost:3000/api/system/status");
 
 console.log("3. Expected readiness:");
 console.log("   - database: configured");
-console.log("   - databaseProvider: neon");
+console.log("   - databaseProvider: supabase");
 console.log("   - storage.persistence: postgres");
 console.log("   - r2: configured");
 console.log("   - coinbase: missing");

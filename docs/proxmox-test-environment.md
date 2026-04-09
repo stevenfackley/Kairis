@@ -2,14 +2,14 @@
 
 ## Goal
 
-Run Kairis in a Proxmox-hosted test environment using Docker Compose, with local persistence for development data and optional Neon-backed Postgres connectivity.
+Run Kairis in a Proxmox-hosted test environment using Docker Compose, with local persistence for development data and optional Supabase-backed Postgres connectivity.
 
 ## Deployment Model
 
 - Proxmox hosts a Linux VM or LXC capable of running Docker
 - Docker Compose runs the Kairis app container
 - local test data is persisted in `./proxmox-data`
-- Neon-backed Postgres remains the intended managed backend when configured
+- Supabase-backed Postgres remains the intended managed backend when configured
 - Cloudflare R2 remains the intended export artifact target when configured
 - Coinbase assisted live trading remains disabled in test by default
 
@@ -32,7 +32,7 @@ Run Kairis in a Proxmox-hosted test environment using Docker Compose, with local
 
 1. Clone the repo onto the Proxmox test host.
 2. Copy `.env.proxmox-test.example` to `.env.proxmox-test`.
-3. Fill in `DATABASE_URL` for the active Neon branch or database.
+3. Fill in the active Supabase database settings, including `SUPABASE_DB_PASSWORD`.
 4. Leave `EXCHANGE_PROVIDER=mock` and `ENABLE_LIVE_ASSISTED_TRADING=false` for initial testing.
 5. Run the preflight:
 
@@ -58,7 +58,7 @@ curl http://localhost:3000/api/system/status
 Expected status details:
 
 - `services.database` = `configured`
-- `services.databaseProvider` = `neon`
+- `services.databaseProvider` = `supabase`
 - `storage.persistence` = `postgres`
 - `services.r2` = `configured`
 - `services.coinbase` = `missing`

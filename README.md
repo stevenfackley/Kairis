@@ -149,7 +149,7 @@ These decisions should be treated as active defaults unless revised in the docs:
 - paper mode is the safest default starting experience
 - public value is centered on control and safer execution, not promises of profit
 - public unattended automation is not part of the initial launch posture
-- `Neon Postgres` is the default managed backend foundation
+- `Supabase Postgres` is the default managed backend foundation
 - `Cloudflare R2` is the default object storage layer for exports and durable artifacts
 - local `Proxmox` will be used for test environments
 - only `AWS EC2` is assumed to be available from AWS, and it is the intended production hosting path
@@ -197,8 +197,8 @@ The repository now contains:
 
 The next implementation phase should focus on:
 
-- wiring the active `Neon` connection string into local, test, and GitHub deployment secrets
-- applying the repo SQL migrations to the Neon branch or database
+- wiring the active `Supabase` database settings into local, test, and GitHub deployment secrets
+- applying the repo SQL migrations to the active Supabase database
 - validating Docker deployment on the Proxmox host
 - wiring real Coinbase credentials only after the rest of the environment is stable
 

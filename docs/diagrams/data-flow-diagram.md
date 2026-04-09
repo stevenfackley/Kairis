@@ -23,7 +23,7 @@ This document describes the logical data movement for Kairis. It is intentionall
 
 ## Infrastructure Mapping
 
-- identity, entitlements, operational records, and other relational data are assumed to live in managed `Postgres`, currently `Neon`
+- identity, entitlements, operational records, and other relational data are assumed to live in managed `Postgres`, currently `Supabase`
 - generated exports and file-like artifacts are assumed to live in `Cloudflare R2`
 - application services should remain portable between local Proxmox test environments and AWS EC2 production hosting
 
