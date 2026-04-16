@@ -12,6 +12,9 @@ on:
           - proxmox-test
           - ec2-production
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   validate:
     runs-on: ubuntu-latest
