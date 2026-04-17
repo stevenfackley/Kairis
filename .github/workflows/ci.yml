@@ -10,33 +10,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-<<<<<<< HEAD
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-=======
   ci:
     uses: stevenfackley/gh-actions/.github/workflows/ci-node.yml@v1
     with:
       project-name: Kairis
       node-version: "22"
     secrets: inherit
->>>>>>> 8fb35a0 (ci: delegate to stevenfackley/gh-actions/ci-node.yml@v1)
