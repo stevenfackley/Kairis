@@ -69,7 +69,7 @@ jobs:
           test -n "$PROXMOX_TEST_ENV_FILE" || { echo "Missing PROXMOX_TEST_ENV_FILE secret."; exit 1; }
 
       - name: Deploy to Proxmox test host
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROXMOX_HOST }}
           username: ${{ secrets.PROXMOX_USER }}
