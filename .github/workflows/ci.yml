@@ -1,15 +1,16 @@
-name: CI
+name: ci
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
+  push:
+    branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+<<<<<<< HEAD
   build:
     runs-on: ubuntu-latest
 
@@ -31,3 +32,11 @@ jobs:
 
       - name: Build
         run: npm run build
+=======
+  ci:
+    uses: stevenfackley/gh-actions/.github/workflows/ci-node.yml@v1
+    with:
+      project-name: Kairis
+      node-version: "22"
+    secrets: inherit
+>>>>>>> 8fb35a0 (ci: delegate to stevenfackley/gh-actions/ci-node.yml@v1)
