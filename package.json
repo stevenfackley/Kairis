@@ -27,7 +27,7 @@
     "@types/react-dom": "^19.0.4",
     "supabase": "^2.92.0",
     "typescript": "^5.8.3",
-    "wrangler": "^4.80.0"
+    "wrangler": "^4.83.0"
   },
   "engines": {
     "node": ">=22.0.0"
