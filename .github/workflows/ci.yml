@@ -13,6 +13,6 @@ jobs:
   ci:
     uses: stevenfackley/gh-actions/.github/workflows/ci-node.yml@v1
     with:
-      project-name: Kairis
+      project-name: kairis
       node-version: "22"
     secrets: inherit
