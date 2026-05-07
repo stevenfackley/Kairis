@@ -1,31 +1,45 @@
-# {{PROJECT_NAME}}
+# Kairis
+
+> Disciplined non-custodial crypto trading workflow scaffold.
 
 ## Stack
-{{FLAVOR}}. Next.js 15 App Router + React 19 + TS 5.6. See `docs/architecture/SDD.md`.
-
-## Standard flow
-analyze -> read docs/ -> read package.json + tsconfig.json -> plan -> work.
+- **Runtime:** Next.js 16 App Router + React 19 + TypeScript 5.8
+- **Storage:** Postgres (`pg`)
+- **Crypto:** Coinbase CDP SDK (`@coinbase/cdp-sdk`)
+- **Cloud:** AWS S3 (`@aws-sdk/client-s3`)
+- **Local tooling:** Supabase CLI, Wrangler
 
 ## Conventions
-- Image tags: `sha-{SHORT_SHA}` (test), `prod-{SHA}` (prod).
-- Release tags: `YYYYMMDD_{{PROJECT_NAME}}_Release`.
-- Components: Server by default. `"use client"` is a scalpel, not a default.
-- Tests: vitest (unit/RTL), playwright (smoke PR, integration main, full nightly).
-- Lint: `next lint` (ESLint 9 flat config). Types strict + `noUncheckedIndexedAccess`.
-- Commits: Conventional Commits.
+- **Package manager: npm** (see `package-lock.json`)
+- npm `overrides`: `axios` (CVE — `^1.15.2`+, see PR #24), `postcss` (CVE — `^8.5.10`+)
+- Components: server by default. `"use client"` is a scalpel, not a default.
+- Lint: not configured (`"lint"` script is a no-op echo)
+- Tests: not configured (`"test"` script is a no-op echo)
+- Typecheck via `tsc -p tsconfig.typecheck.json --noEmit`
+- Commits: Conventional Commits
+- Branches: `main` protected. Squash-merge via PR.
 
 ## Deploy target
-{{DEPLOY_TARGET}}
+- **Test:** Proxmox (via `proxmox:preflight` and `proxmox:deploy` scripts in `package.json`)
+- **Prod:** AWS EC2
 
 ## Commands
-- `/ship` — lint + typecheck + vitest + build + secret-scan
-- `/deploy-test` — trigger test deploy
-- `/add-adr` — new DECISIONS.md entry
-- `/smoke` — playwright smoke locally
+- `npm run dev` — local dev (Next dev server)
+- `npm run build` — production build
+- `npm run typecheck` — TS type-only check
+- `npm run db:migrate` — db migrations
+- `npm run proxmox:preflight` / `npm run proxmox:deploy` — test deployment
+
+## CI/CD
+- `.github/workflows/ci.yml` — runs on PRs and pushes
+- `.github/workflows/deploy.yml` — Proxmox (test), EC2 (prod)
+- Dockerfile: `node:22-alpine` multi-stage (deps → builder → runner)
 
 ## Do not
+- Bump axios override below `^1.15.2` — multiple CVEs. The override is the *only* thing forcing transitive bumps past parent pins.
+- Bump postcss override below `^8.5.10` (CVE).
+- Treat `"axios": "^X.Y.Z"` overrides as set-and-forget — they silently cap the dep at `Z` until manually bumped (lesson from PR #24).
 - Add static AWS keys. Use OIDC.
-- Ship `console.log` in production code.
+- Reach for CSS-in-JS. Tailwind only.
 - Use `any`. Use `unknown` + narrowing.
-- Add telemetry SDKs. Banned by CI.
-- Reach for CSS-in-JS. Tailwind or CSS modules only.
+- Add telemetry SDKs (ApplicationInsights/Sentry/Datadog/etc).
