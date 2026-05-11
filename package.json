@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",
-    "@coinbase/cdp-sdk": "^1.48.2",
+    "@coinbase/cdp-sdk": "^1.48.3",
     "next": "^16.2.6",
     "pg": "^8.20.0",
     "react": "^19.2.6",
