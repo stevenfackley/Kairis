@@ -1,4 +1,4 @@
-# Kairis
+# Kairis <sub>`>o)`</sub>
 
 Kairis is a documentation-first fintech project for a non-custodial crypto trading system built around disciplined execution, visible risk controls, and mode-based trading workflows.
 
