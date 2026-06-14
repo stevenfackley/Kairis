@@ -1,0 +1,11 @@
+[tasks]
+dev = "npm run dev"
+build = "npm run build"
+start = "npm run start"
+typecheck = "npm run typecheck"
+lint = "npm run lint"
+test = "npm run test"
+db-migrate = "npm run db:migrate"
+"proxmox:preflight" = "npm run proxmox:preflight"
+"proxmox:deploy" = "npm run proxmox:deploy"
+setup = "npm ci"
