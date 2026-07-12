@@ -60,7 +60,7 @@ async function appendAuditEvent(event: AuditEvent) {
 
   if (database) {
     await database.query(
-      `insert into public.audit_events (id, user_id, category, action, detail, created_at)
+      `insert into audit_events (id, user_id, category, action, detail, created_at)
        values ($1, $2, $3, $4, $5, $6)`,
       [event.id, event.userId, event.category, event.action, event.detail, event.createdAt]
     );
@@ -113,22 +113,22 @@ async function getDatabaseSnapshot(): Promise<Phase4Snapshot | null> {
       exportsResult,
       assistedOrdersResult
     ] = await Promise.all([
-      database.query("select * from public.onboarding_states where user_id = $1 limit 1", [demoUserId]),
-      database.query("select * from public.trading_limits where user_id = $1 limit 1", [demoUserId]),
+      database.query("select * from onboarding_states where user_id = $1 limit 1", [demoUserId]),
+      database.query("select * from trading_limits where user_id = $1 limit 1", [demoUserId]),
       database.query(
-        "select * from public.paper_trades where user_id = $1 order by created_at desc",
+        "select * from paper_trades where user_id = $1 order by created_at desc",
         [demoUserId]
       ),
       database.query(
-        "select * from public.audit_events where user_id = $1 order by created_at desc limit 50",
+        "select * from audit_events where user_id = $1 order by created_at desc limit 50",
         [demoUserId]
       ),
       database.query(
-        "select * from public.export_artifacts where user_id = $1 order by created_at desc",
+        "select * from export_artifacts where user_id = $1 order by created_at desc",
         [demoUserId]
       ),
       database.query(
-        "select * from public.assisted_orders where user_id = $1 order by created_at desc",
+        "select * from assisted_orders where user_id = $1 order by created_at desc",
         [demoUserId]
       )
     ]);
@@ -245,7 +245,7 @@ export async function saveOnboardingState(
 
   if (database) {
     await database.query(
-      `insert into public.onboarding_states (
+      `insert into onboarding_states (
          user_id, preferred_mode, risk_acknowledged, exchange_connected, completed_at, updated_at
        ) values ($1, $2, $3, $4, $5, $6)
        on conflict (user_id) do update set
@@ -290,7 +290,7 @@ export async function saveTradingLimits(
 
   if (database) {
     await database.query(
-      `insert into public.trading_limits (
+      `insert into trading_limits (
          user_id, max_position_usd, daily_loss_cap_usd, max_trades_per_day, cooldown_minutes, updated_at
        ) values ($1, $2, $3, $4, $5, $6)
        on conflict (user_id) do update set
@@ -336,7 +336,7 @@ export async function addPaperTrade(
 
   if (database) {
     await database.query(
-      `insert into public.paper_trades (
+      `insert into paper_trades (
          id, user_id, symbol, side, quantity, entry_price, status, note, created_at
        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
@@ -406,7 +406,7 @@ export async function createPaperJournalExport() {
 
   if (database) {
     await database.query(
-      `insert into public.export_artifacts (
+      `insert into export_artifacts (
          id, user_id, type, storage, location, created_at
        ) values ($1, $2, $3, $4, $5, $6)`,
       [
@@ -440,7 +440,7 @@ export async function recordAssistedOrder(record: AssistedOrderRecord) {
 
   if (database) {
     await database.query(
-      `insert into public.assisted_orders (
+      `insert into assisted_orders (
          id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, created_at
        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        on conflict (id) do update set
@@ -509,7 +509,7 @@ export async function reconcileAssistedOrders() {
   if (database) {
     for (const order of nextOrders) {
       await database.query(
-        `insert into public.assisted_orders (
+        `insert into assisted_orders (
            id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, created_at
          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          on conflict (id) do update set
