@@ -1,6 +1,4 @@
-create extension if not exists "pgcrypto";
-
-create table if not exists public.onboarding_states (
+create table if not exists onboarding_states (
   user_id text primary key,
   preferred_mode text not null check (preferred_mode in ('paper', 'manual', 'assisted', 'auto')),
   risk_acknowledged boolean not null default false,
@@ -9,7 +7,7 @@ create table if not exists public.onboarding_states (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.trading_limits (
+create table if not exists trading_limits (
   user_id text primary key,
   max_position_usd numeric(12,2) not null,
   daily_loss_cap_usd numeric(12,2) not null,
@@ -18,7 +16,7 @@ create table if not exists public.trading_limits (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.paper_trades (
+create table if not exists paper_trades (
   id uuid primary key default gen_random_uuid(),
   user_id text not null,
   symbol text not null,
@@ -31,9 +29,9 @@ create table if not exists public.paper_trades (
 );
 
 create index if not exists idx_paper_trades_user_created_at
-  on public.paper_trades (user_id, created_at desc);
+  on paper_trades (user_id, created_at desc);
 
-create table if not exists public.audit_events (
+create table if not exists audit_events (
   id uuid primary key default gen_random_uuid(),
   user_id text not null,
   category text not null check (category in ('onboarding', 'limits', 'paper-trade', 'export')),
@@ -43,9 +41,9 @@ create table if not exists public.audit_events (
 );
 
 create index if not exists idx_audit_events_user_created_at
-  on public.audit_events (user_id, created_at desc);
+  on audit_events (user_id, created_at desc);
 
-create table if not exists public.export_artifacts (
+create table if not exists export_artifacts (
   id uuid primary key default gen_random_uuid(),
   user_id text not null,
   type text not null check (type in ('paper-journal')),
@@ -55,9 +53,9 @@ create table if not exists public.export_artifacts (
 );
 
 create index if not exists idx_export_artifacts_user_created_at
-  on public.export_artifacts (user_id, created_at desc);
+  on export_artifacts (user_id, created_at desc);
 
-create table if not exists public.assisted_orders (
+create table if not exists assisted_orders (
   id uuid primary key default gen_random_uuid(),
   product_id text not null,
   side text not null check (side in ('BUY', 'SELL')),
@@ -71,4 +69,4 @@ create table if not exists public.assisted_orders (
 );
 
 create index if not exists idx_assisted_orders_created_at
-  on public.assisted_orders (created_at desc);
+  on assisted_orders (created_at desc);
