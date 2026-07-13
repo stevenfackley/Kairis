@@ -9,6 +9,11 @@ updates:
         patterns: ["next", "react*", "eslint-config-next"]
       testing:
         patterns: ["vitest*", "@testing-library/*", "@playwright/*", "jsdom"]
+    ignore:
+      # TypeScript 7.0 is the native "Corsa" rewrite — a breaking major that
+      # fails typecheck (Dependabot #85, closed 2026-07-13). Allow 6.x, block 7+.
+      - dependency-name: "typescript"
+        versions: [">=7.0.0"]
 
   - package-ecosystem: docker
     directory: /
