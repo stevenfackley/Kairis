@@ -27,7 +27,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "supabase": "^2.116.0",
+    "supabase": "^2.117.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.134.0"
   },
