@@ -1,6 +1,11 @@
+import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@coinbase/cdp-sdk/auth", () => ({ generateJwt: vi.fn(async () => "token") }));
+
+import { generateJwt } from "@coinbase/cdp-sdk/auth";
 
 import {
   createCoinbaseClient,
@@ -10,7 +15,17 @@ import {
   mapPreview,
   mapSubmit
 } from "@/lib/exchange/coinbase";
-import { fetchCandles, fetchTicker, mapCandles, mapTicker } from "@/lib/exchange/coinbase-public";
+import {
+  __setProductLoader,
+  fetchCandles,
+  fetchProduct,
+  fetchTicker,
+  getProductRules,
+  mapCandles,
+  mapProduct,
+  mapTicker
+} from "@/lib/exchange/coinbase-public";
+import { ExchangeHttpError, ExchangeTransportError, normalizeExchangeError } from "@/lib/exchange/errors";
 
 function stub(status: number, body: unknown) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -107,15 +122,59 @@ describe("public fetchers", () => {
   });
 });
 
+describe("product rules", () => {
+  const btc = JSON.parse(readFileSync(path.resolve(__dirname, "../fixtures/coinbase/product-btc-usd.json"), "utf8")) as Record<string, unknown>;
+
+  it("fetchProduct GETs the public product and maps it", async () => {
+    const f = stub(200, btc);
+    const rules = await fetchProduct("BTC-USD", f);
+    expect(rules).toMatchObject({ productId: "BTC-USD", quoteIncrement: "0.01", quoteMinSize: "1", baseIncrement: "0.00000001" });
+    expect(call(f).url).toBe("https://api.coinbase.com/api/v3/brokerage/market/products/BTC-USD");
+    expect(call(f).init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("says plainly when Coinbase does not offer the product", async () => {
+    const f = stub(404, { error: "NOT_FOUND", error_details: "Product NOPE-USD not supported", message: "Product NOPE-USD not supported" });
+    await expect(fetchProduct("NOPE-USD", f)).rejects.toThrow("Coinbase does not offer NOPE-USD for trading (HTTP 404).");
+  });
+
+  it("getProductRules caches per product for five minutes and does not cache failures", async () => {
+    const rules = mapProduct(btc);
+    const loader = vi.fn(async () => rules);
+    __setProductLoader(loader);
+    try {
+      await getProductRules("BTC-USD");
+      await getProductRules("BTC-USD");
+      expect(loader).toHaveBeenCalledTimes(1);
+      await getProductRules("BTC-USD", Date.now() + 6 * 60_000);
+      expect(loader).toHaveBeenCalledTimes(2);
+
+      const failing = vi.fn(async () => {
+        throw new Error("down");
+      });
+      __setProductLoader(failing);
+      await expect(getProductRules("ETH-USD")).rejects.toThrow("down");
+      await expect(getProductRules("ETH-USD")).rejects.toThrow("down");
+      expect(failing).toHaveBeenCalledTimes(2);
+    } finally {
+      __setProductLoader(null);
+    }
+  });
+});
+
 describe("authed mappers", () => {
   it("mapKeyPermissions", () => {
-    expect(mapKeyPermissions({ can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "p-1" })).toEqual({
+    // Shaped like the documented GET /api/v3/brokerage/key_permissions response.
+    expect(mapKeyPermissions({ can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "p-1", portfolio_type: "CONSUMER" })).toEqual({
       canView: true,
       canTrade: false,
       canTransfer: false,
-      portfolioUuid: "p-1"
+      portfolioUuid: "p-1",
+      portfolioType: "CONSUMER"
     });
-    expect(mapKeyPermissions({ can_view: true, can_trade: true, can_transfer: true }).portfolioUuid).toBeNull();
+    expect(mapKeyPermissions({ can_view: true, can_trade: true, can_transfer: true })).toMatchObject({ portfolioUuid: null, portfolioType: null });
+    // UNDEFINED is the enum's default, not a portfolio type.
+    expect(mapKeyPermissions({ can_view: true, portfolio_type: "UNDEFINED" }).portfolioType).toBeNull();
     expect(() => mapKeyPermissions("x")).toThrow();
   });
 
@@ -131,40 +190,96 @@ describe("authed mappers", () => {
     expect(() => mapBalances({})).toThrow();
   });
 
-  it("mapPreview", () => {
-    expect(
-      mapPreview({
-        order_total: "100",
-        commission_total: "0.6",
-        best_bid: "99",
-        best_ask: "101",
-        preview_id: "pv",
-        errs: ["e1"],
-        warning: ["w1"]
-      })
-    ).toEqual({ previewId: "pv", orderTotal: 100, commissionTotal: 0.6, bestBid: 99, bestAsk: 101, warnings: ["e1", "w1"] });
+  // Shaped like the documented OrderPreviewResponse: every amount a string, errs/warning enum arrays.
+  const previewOk = {
+    order_total: "100",
+    commission_total: "0.6",
+    errs: [],
+    warning: [],
+    quote_size: "99.4",
+    base_size: "0.00119869",
+    best_bid: "82921.35",
+    best_ask: "82921.36",
+    is_max: false,
+    preview_id: "b40bbff9-17ce-4726-8b64-9de7ae57ad26"
+  };
+
+  it("mapPreview reads a clean preview", () => {
+    expect(mapPreview(previewOk)).toEqual({
+      previewId: "b40bbff9-17ce-4726-8b64-9de7ae57ad26",
+      orderTotal: 100,
+      commissionTotal: 0.6,
+      bestBid: 82921.35,
+      bestAsk: 82921.36,
+      baseSize: 0.00119869,
+      quoteSize: 99.4,
+      errors: [],
+      warnings: []
+    });
     expect(mapPreview({})).toEqual({
       previewId: null,
       orderTotal: 0,
       commissionTotal: 0,
       bestBid: null,
       bestAsk: null,
+      baseSize: null,
+      quoteSize: null,
+      errors: [],
       warnings: []
     });
   });
 
-  it("mapSubmit success and failure", () => {
+  it("mapPreview keeps errs apart from warnings and words both", () => {
+    const out = mapPreview({ ...previewOk, errs: ["PREVIEW_INSUFFICIENT_FUND", "PREVIEW_SOMETHING_NEW"], warning: ["UNKNOWN", "BIG_ORDER"] });
+    expect(out.errors).toEqual([
+      "Not enough funds in the Coinbase account for this order. (PREVIEW_INSUFFICIENT_FUND)",
+      "Something new. (PREVIEW_SOMETHING_NEW)"
+    ]);
+    expect(out.warnings).toEqual(["Large order for this market: expect the fill price to move against you. (BIG_ORDER)"]);
+  });
+
+  it("mapSubmit reads the documented success and failure shapes", () => {
     expect(
-      mapSubmit({ success: true, success_response: { order_id: "o1", client_order_id: "c1" } }, "c1")
-    ).toEqual({ success: true, orderId: "o1", clientOrderId: "c1", detail: "Coinbase accepted the order." });
-    expect(mapSubmit({ success: false, error_response: { message: "m", error_details: "d" } }, "c1").detail).toBe("d");
-    expect(mapSubmit({ success: false, error_response: { message: "m" } }, "c1").detail).toBe("m");
-    expect(mapSubmit({ success: false, error_response: { preview_failure_reason: "p" } }, "c1").detail).toBe("p");
+      mapSubmit({ success: true, success_response: { order_id: "11111-00000-000000", product_id: "BTC-USD", side: "BUY", client_order_id: "c1" }, order_configuration: {} }, "c1")
+    ).toEqual({ success: true, orderId: "11111-00000-000000", clientOrderId: "c1", failureReason: null, detail: "Coinbase accepted the order." });
+
+    const rejected = mapSubmit(
+      {
+        success: false,
+        error_response: {
+          error: "INSUFFICIENT_FUND",
+          message: "Insufficient balance in source account",
+          error_details: "",
+          preview_failure_reason: "PREVIEW_INSUFFICIENT_FUND",
+          new_order_failure_reason: "INSUFFICIENT_FUND"
+        },
+        order_configuration: { market_market_ioc: { quote_size: "100" } }
+      },
+      "c1"
+    );
+    expect(rejected).toEqual({
+      success: false,
+      orderId: null,
+      clientOrderId: "c1",
+      failureReason: "INSUFFICIENT_FUND",
+      detail: 'Coinbase rejected the order. Not enough funds in the Coinbase account for this order. (INSUFFICIENT_FUND) Coinbase says: "Insufficient balance in source account".'
+    });
+
+    // Only the deprecated preview reason, and an UNKNOWN_* default that says nothing.
+    expect(mapSubmit({ success: false, error_response: { preview_failure_reason: "PREVIEW_INVALID_BASE_SIZE_TOO_SMALL" } }, "c1")).toMatchObject({
+      failureReason: "PREVIEW_INVALID_BASE_SIZE_TOO_SMALL",
+      detail: "Coinbase rejected the order. The order is below the minimum size Coinbase accepts for this product. (PREVIEW_INVALID_BASE_SIZE_TOO_SMALL)"
+    });
+    expect(mapSubmit({ success: false, error_response: { new_order_failure_reason: "UNKNOWN_FAILURE_REASON", error_details: "Market orders cannot be placed with empty order sizes" } }, "c1")).toMatchObject({
+      failureReason: null,
+      detail: 'Coinbase rejected the order. Coinbase says: "Market orders cannot be placed with empty order sizes".'
+    });
     expect(mapSubmit({ success: false }, "c1")).toEqual({
       success: false,
       orderId: null,
       clientOrderId: "c1",
-      detail: "Coinbase rejected the order."
+      failureReason: null,
+      detail: "Coinbase rejected the order without giving a reason."
     });
   });
 
@@ -173,21 +288,84 @@ describe("authed mappers", () => {
     for (const s of ["FILLED", "CANCELLED", "EXPIRED", "FAILED", "OPEN"]) {
       expect(row(s).status).toBe(s);
     }
-    for (const s of ["PENDING", "QUEUED", "CANCEL_QUEUED"]) {
+    // Every documented in-flight status, EDIT_QUEUED included.
+    for (const s of ["PENDING", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"]) {
       expect(row(s).status).toBe("PENDING");
     }
+    expect(row("UNKNOWN_ORDER_STATUS")).toMatchObject({ status: "UNKNOWN", raw: "UNKNOWN_ORDER_STATUS" });
     expect(row("WEIRD")).toMatchObject({ status: "UNKNOWN", raw: "WEIRD" });
     expect(
       mapOrderStatus({
         order: { order_id: "o", status: "FILLED", filled_size: "0.5", average_filled_price: "200", total_fees: "0.6" }
       })
-    ).toEqual({ orderId: "o", status: "FILLED", filledSize: 0.5, averagePrice: 200, totalFees: 0.6, raw: "FILLED" });
+    ).toEqual({ orderId: "o", status: "FILLED", filledSize: 0.5, averagePrice: 200, totalFees: 0.6, raw: "FILLED", message: null });
     expect(() => mapOrderStatus({})).toThrow();
+  });
+
+  it("mapOrderStatus reads a recorded IOC order, a partial fill and a rejection", () => {
+    // Recorded GET orders/historical entry (ccxt coinbase adapter), quote-sized market buy.
+    const recorded = {
+      order: {
+        order_id: "813a53c5-3e39-47bb-863d-2faf685d22d8",
+        product_id: "BTC-USDT",
+        order_configuration: { market_market_ioc: { quote_size: "6.36" } },
+        side: "BUY",
+        client_order_id: "18eb9947-db49-4874-8e7b-39b8fe5f4317",
+        status: "FILLED",
+        time_in_force: "IMMEDIATE_OR_CANCEL",
+        completion_percentage: "100",
+        filled_size: "0.000297920684505",
+        average_filled_price: "21220.6399999973697697",
+        number_of_fills: "2",
+        filled_value: "6.3220675944333996",
+        size_in_quote: true,
+        total_fees: "0.0379324055666004",
+        size_inclusive_of_fees: true,
+        total_value_after_fees: "6.36",
+        reject_message: "",
+        cancel_message: "Internal error"
+      }
+    };
+    expect(mapOrderStatus(recorded)).toEqual({
+      orderId: "813a53c5-3e39-47bb-863d-2faf685d22d8",
+      status: "FILLED",
+      filledSize: 0.000297920684505,
+      averagePrice: 21220.6399999973697697,
+      totalFees: 0.0379324055666004,
+      raw: "FILLED",
+      message: null
+    });
+    const partial = { order: { ...recorded.order, status: "CANCELLED", completion_percentage: "40", filled_size: "0.0001", cancel_message: "IOC remainder cancelled" } };
+    expect(mapOrderStatus(partial)).toMatchObject({ status: "CANCELLED", filledSize: 0.0001, message: "IOC remainder cancelled" });
+    const unfilled = { order: { ...recorded.order, status: "FAILED", filled_size: "0", average_filled_price: "0", total_fees: "0", reject_message: "Insufficient balance", cancel_message: "" } };
+    // "0" is Coinbase's placeholder for no average price, not a price of zero.
+    expect(mapOrderStatus(unfilled)).toMatchObject({ status: "FAILED", filledSize: 0, averagePrice: null, message: "Insufficient balance" });
   });
 });
 
 describe("createCoinbaseClient", () => {
-  const creds = { keyId: "kid", secret: "sec" };
+  const ec = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
+  // The SEC1 PEM exactly as Coinbase's ECDSA key download holds it.
+  const creds = { keyId: "organizations/org-1/apiKeys/key-1", secret: ec.export({ type: "sec1", format: "pem" }).toString() };
+
+  it("signs with the normalized PKCS#8 key and a uri claim without the query string", async () => {
+    vi.mocked(generateJwt).mockClear();
+    const f = stub(200, { accounts: [] });
+    await createCoinbaseClient(creds, f).balances();
+    expect(generateJwt).toHaveBeenCalledWith({
+      apiKeyId: "organizations/org-1/apiKeys/key-1",
+      apiKeySecret: ec.export({ type: "pkcs8", format: "pem" }).toString(),
+      requestMethod: "GET",
+      requestHost: "api.coinbase.com",
+      requestPath: "/api/v3/brokerage/accounts"
+    });
+  });
+
+  it("refuses a malformed stored key without calling Coinbase", async () => {
+    const f = stub(200, {});
+    await expect(createCoinbaseClient({ keyId: "kid", secret: "sec" }, f).keyPermissions()).rejects.toThrow("not in a format Coinbase issues");
+    expect(f).not.toHaveBeenCalled();
+  });
 
   it("keyPermissions GETs with bearer", async () => {
     const f = stub(200, { can_view: true, can_trade: true, can_transfer: false });
@@ -201,14 +379,31 @@ describe("createCoinbaseClient", () => {
   });
 
   it("balances GETs accounts", async () => {
-    const f = stub(200, { accounts: [{ currency: "USD", available_balance: { value: "5", currency: "USD" } }] });
+    const f = stub(200, { accounts: [{ currency: "USD", available_balance: { value: "5", currency: "USD" } }], has_next: false, cursor: "", size: 1 });
     expect(await createCoinbaseClient(creds, f).balances()).toEqual([{ currency: "USD", available: 5 }]);
     expect(call(f).url).toBe("https://api.coinbase.com/api/v3/brokerage/accounts?limit=250");
   });
 
-  it("previewOrder POSTs market config", async () => {
-    const f = stub(200, { preview_id: "pv", order_total: "10" });
-    const out = await createCoinbaseClient(creds, f).previewOrder({ productId: "BTC-USD", side: "BUY", quoteUsd: 10 });
+  it("balances follows the cursor across pages", async () => {
+    const account = (currency: string, value: string) => ({ currency, available_balance: { value, currency } });
+    const pages = [
+      { accounts: [account("USD", "5")], has_next: true, cursor: "c-2", size: 1 },
+      { accounts: [account("BTC", "0.5")], has_next: false, cursor: "", size: 1 }
+    ];
+    const f = vi.fn(async () => new Response(JSON.stringify(pages.shift())));
+    expect(await createCoinbaseClient(creds, f).balances()).toEqual([
+      { currency: "USD", available: 5 },
+      { currency: "BTC", available: 0.5 }
+    ]);
+    expect(f.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual([
+      "https://api.coinbase.com/api/v3/brokerage/accounts?limit=250",
+      "https://api.coinbase.com/api/v3/brokerage/accounts?limit=250&cursor=c-2"
+    ]);
+  });
+
+  it("previewOrder sizes a BUY with quote_size", async () => {
+    const f = stub(200, { preview_id: "pv", order_total: "10", errs: [], warning: [] });
+    const out = await createCoinbaseClient(creds, f).previewOrder({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "10" } });
     expect(out.previewId).toBe("pv");
     const { url, init, headers } = call(f);
     expect(url).toBe("https://api.coinbase.com/api/v3/brokerage/orders/preview");
@@ -217,27 +412,74 @@ describe("createCoinbaseClient", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       product_id: "BTC-USD",
       side: "BUY",
-      order_configuration: { market_market_ioc: { quote_size: "10.00" } }
+      order_configuration: { market_market_ioc: { quote_size: "10" } }
     });
   });
 
-  it("createOrder POSTs with ids", async () => {
+  it("previewOrder and createOrder size a SELL with base_size, never quote_size", async () => {
+    const preview = stub(200, { preview_id: "pv", errs: [], warning: [] });
+    await createCoinbaseClient(creds, preview).previewOrder({ productId: "BTC-USD", side: "SELL", size: { kind: "base", baseSize: "0.00120596" } });
+    expect(JSON.parse(call(preview).init.body as string).order_configuration).toEqual({ market_market_ioc: { base_size: "0.00120596" } });
+
     const f = stub(200, { success: true, success_response: { order_id: "o1", client_order_id: "c1" } });
     const out = await createCoinbaseClient(creds, f).createOrder({
       productId: "BTC-USD",
       side: "SELL",
-      quoteUsd: 12.345,
+      size: { kind: "base", baseSize: "0.00120596" },
       clientOrderId: "c1",
       previewId: "pv"
     });
     expect(out.orderId).toBe("o1");
     const { url, init } = call(f);
     expect(url).toBe("https://api.coinbase.com/api/v3/brokerage/orders");
-    expect(JSON.parse(init.body as string)).toMatchObject({
+    expect(JSON.parse(init.body as string)).toEqual({
       client_order_id: "c1",
+      product_id: "BTC-USD",
+      side: "SELL",
       preview_id: "pv",
-      side: "SELL"
+      order_configuration: { market_market_ioc: { base_size: "0.00120596" } }
     });
+  });
+
+  it("refuses to send a quote-sized SELL", async () => {
+    const f = stub(200, {});
+    await expect(
+      createCoinbaseClient(creds, f).createOrder({ productId: "BTC-USD", side: "SELL", size: { kind: "quote", quoteSize: "100" }, clientOrderId: "c1" })
+    ).rejects.toThrow("A market SELL must be sized in base currency (base_size).");
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("findOrderByClientId lists a narrow window and matches client_order_id", async () => {
+    const page = {
+      orders: [
+        { order_id: "other", client_order_id: "someone-else", status: "FILLED" },
+        { order_id: "cb-7", client_order_id: "11111111-1111-4111-8111-111111111111", status: "FILLED", filled_size: "0.002", average_filled_price: "50000", total_fees: "0.6" }
+      ],
+      has_next: false,
+      cursor: ""
+    };
+    const f = stub(200, page);
+    const found = await createCoinbaseClient(creds, f).findOrderByClientId({
+      clientOrderId: "11111111-1111-4111-8111-111111111111",
+      productId: "BTC-USD",
+      side: "BUY",
+      createdAfter: "2026-10-10T12:00:00.000Z",
+      createdBefore: "2026-10-10T12:15:00.000Z"
+    });
+    expect(found).toMatchObject({ orderId: "cb-7", status: "FILLED", filledSize: 0.002 });
+    expect(call(f).url).toBe(
+      "https://api.coinbase.com/api/v3/brokerage/orders/historical/batch?product_ids=BTC-USD&order_side=BUY&start_date=2026-10-10T12%3A00%3A00.000Z&end_date=2026-10-10T12%3A15%3A00.000Z&limit=100"
+    );
+    expect(generateJwt).toHaveBeenLastCalledWith(expect.objectContaining({ requestPath: "/api/v3/brokerage/orders/historical/batch" }));
+
+    const none = await createCoinbaseClient(creds, stub(200, { orders: [], has_next: false })).findOrderByClientId({
+      clientOrderId: "x",
+      productId: "BTC-USD",
+      side: "BUY",
+      createdAfter: "2026-10-10T12:00:00.000Z",
+      createdBefore: "2026-10-10T12:15:00.000Z"
+    });
+    expect(none).toBeNull();
   });
 
   it("getOrder GETs historical", async () => {
@@ -247,10 +489,41 @@ describe("createCoinbaseClient", () => {
     expect(call(f).url).toBe("https://api.coinbase.com/api/v3/brokerage/orders/historical/o1");
   });
 
-  it("throws with status on non-2xx", async () => {
-    await expect(createCoinbaseClient(creds, stub(401, "nope")).keyPermissions()).rejects.toThrow(
-      "Coinbase request failed (401): nope"
+  it("throws a readable typed error on non-2xx", async () => {
+    await expect(createCoinbaseClient(creds, stub(401, "Unauthorized")).keyPermissions()).rejects.toThrow(
+      "Coinbase rejected the API key (HTTP 401): Unauthorized."
     );
+    const body = { error: "PERMISSION_DENIED", error_details: "Missing required scopes", message: "Missing required scopes" };
+    const err = await createCoinbaseClient(creds, stub(403, body)).balances().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExchangeHttpError);
+    expect(err).toMatchObject({ status: 403, reason: "PERMISSION_DENIED", message: "Coinbase refused the request (HTTP 403): Missing required scopes." });
+    expect(normalizeExchangeError(await createCoinbaseClient(creds, stub(429, "")).balances().catch((e: unknown) => e))).toMatchObject({
+      code: "rate_limited",
+      retriable: true
+    });
+    expect(normalizeExchangeError(await createCoinbaseClient(creds, stub(503, "")).balances().catch((e: unknown) => e))).toMatchObject({
+      code: "provider_unavailable",
+      retriable: true,
+      ambiguous: true
+    });
+  });
+
+  it("passes a 10 s abort signal and maps a timeout or network failure to a transport error", async () => {
+    const f = stub(200, { accounts: [] });
+    await createCoinbaseClient(creds, f).balances();
+    expect(call(f).init.signal).toBeInstanceOf(AbortSignal);
+
+    const timeout = vi.fn(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+    const t = await createCoinbaseClient(creds, timeout).balances().catch((e: unknown) => e);
+    expect(t).toBeInstanceOf(ExchangeTransportError);
+    expect(t).toMatchObject({ kind: "timeout", message: "Coinbase did not answer within 10 s." });
+
+    const offline = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(await createCoinbaseClient(creds, offline).balances().catch((e: unknown) => e)).toMatchObject({ kind: "network" });
   });
 
   it("throws on malformed JSON", async () => {

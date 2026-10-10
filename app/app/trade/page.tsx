@@ -102,6 +102,7 @@ export default async function TradePage({ searchParams }: { searchParams: Search
             defaultSide={side}
             defaultQuote={quote}
             signalId={signalId}
+            recentOrders={orders}
           />
         </article>
 

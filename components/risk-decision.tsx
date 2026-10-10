@@ -1,8 +1,9 @@
+import { when } from "@/lib/format";
 import type { RiskDecision } from "@/lib/types";
 
 const outcomeCopy: Record<RiskDecision["outcome"], { label: string; pill: string; lede: string }> = {
   approved: { label: "Approved", pill: "pill pill-ok", lede: "Every control passed. You can proceed." },
-  blocked: { label: "Blocked", pill: "pill pill-bad", lede: "A limit you set stopped this order. Nothing was placed." },
+  blocked: { label: "Blocked", pill: "pill pill-bad", lede: "This order was stopped before it reached the exchange. Nothing was placed; the reason is below." },
   halted: { label: "Halted", pill: "pill pill-warn", lede: "Trading is halted until the condition below clears. Nothing was placed." }
 };
 
@@ -34,7 +35,7 @@ export function RiskDecisionView({ decision, title = "Risk checks" }: { decision
           </li>
         ))}
       </ul>
-      <p className="panel-copy risk-evaluated">Evaluated {new Date(decision.evaluatedAt).toLocaleString("en-US", { timeZone: "UTC" })} UTC</p>
+      <p className="panel-copy risk-evaluated">Evaluated {when(decision.evaluatedAt)}</p>
     </section>
   );
 }

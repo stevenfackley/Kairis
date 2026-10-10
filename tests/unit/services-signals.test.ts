@@ -11,7 +11,7 @@ vi.mock("@/lib/server/repos/signals", () => ({ insertSignal: m.insertSignal, lat
 vi.mock("@/lib/server/repos/audit", () => ({ appendAudit: m.appendAudit }));
 
 import { __setMarketFetchers } from "@/lib/server/services/market";
-import { latestSignalsWithSizing, refreshSignals } from "@/lib/server/services/signals";
+import { __resetSignalRefresh, latestSignalsWithSizing, refreshSignals, refreshSignalsOnce, SIGNAL_REFRESH_AFTER_MS } from "@/lib/server/services/signals";
 
 const USER = "user-1";
 
@@ -29,6 +29,7 @@ function ticker(productId: string): Ticker {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  __resetSignalRefresh();
   let n = 0;
   m.insertSignal.mockImplementation(async (e: SignalEvaluation) => ({ ...e, id: `sig-${++n}` }));
   m.appendAudit.mockResolvedValue(undefined);
@@ -80,29 +81,91 @@ describe("refreshSignals", () => {
 });
 
 describe("latestSignalsWithSizing", () => {
-  it("adds the ATR-based suggested size to each latest signal", async () => {
-    const base: SignalRecord = {
-      id: "s1",
-      productId: "BTC-USD",
-      action: "long",
-      setup: "Trend continuation",
-      rationale: [],
-      strength: 0.6,
-      referencePrice: 100,
-      atrPct: 5,
-      rsi: 55,
-      spreadPct: 0.01,
-      dataAgeMs: 1000,
-      evaluatedAt: "2026-10-09T12:00:00.000Z"
-    };
-    m.latestSignals.mockResolvedValue([base, { ...base, id: "s2", productId: "ETH-USD", atrPct: null }]);
-    const limits = { maxPositionUsd: 1500, dailyLossCapUsd: 300 } as TradingLimits;
+  const limits: TradingLimits = {
+    userId: USER,
+    maxPositionUsd: 1500,
+    dailyLossCapUsd: 300,
+    maxTradesPerDay: 6,
+    cooldownMinutes: 20,
+    lossStreakTrigger: 2,
+    perSymbolMaxUsd: { "SOL-USD": 200 },
+    tradingPaused: false,
+    updatedAt: "2026-10-09T00:00:00.000Z"
+  };
+  const record = (productId: string, evaluatedAt: string, atrPct: number | null = 5): SignalRecord => ({
+    id: `s-${productId}`,
+    productId,
+    action: "long",
+    setup: "Trend continuation",
+    rationale: [],
+    strength: 0.6,
+    referencePrice: 100,
+    atrPct,
+    rsi: 55,
+    spreadPct: 0.01,
+    dataAgeMs: 1000,
+    evaluatedAt
+  });
+
+  it("adds the ATR-based suggested size, capped by the per-symbol cap, without refreshing fresh signals", async () => {
+    const fresh = new Date().toISOString();
+    m.latestSignals.mockResolvedValue([record("BTC-USD", fresh), record("ETH-USD", fresh, null), record("SOL-USD", fresh), record("DOGE-USD", fresh)]);
 
     const sized = await latestSignalsWithSizing(limits);
 
     expect(sized.map((s) => [s.productId, s.suggestedQuoteUsd])).toEqual([
       ["BTC-USD", 1500],
-      ["ETH-USD", 0]
+      ["ETH-USD", 0],
+      ["SOL-USD", 200]
     ]);
+    expect(m.insertSignal).not.toHaveBeenCalled();
+  });
+
+  it("re-evaluates once when the latest signals are older than 15 minutes, even for concurrent page loads", async () => {
+    const old = new Date(Date.now() - SIGNAL_REFRESH_AFTER_MS - 60_000).toISOString();
+    m.latestSignals.mockResolvedValue([record("BTC-USD", old), record("ETH-USD", old), record("SOL-USD", old)]);
+    __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+
+    const [a, b] = await Promise.all([latestSignalsWithSizing(limits), latestSignalsWithSizing(limits)]);
+
+    expect(m.insertSignal).toHaveBeenCalledTimes(3);
+    expect(a.map((s) => s.productId)).toEqual(["BTC-USD", "ETH-USD", "SOL-USD"]);
+    expect(b.map((s) => s.id)).toEqual(a.map((s) => s.id));
+    expect(Date.now() - Date.parse(a[0]!.evaluatedAt)).toBeLessThan(60_000);
+  });
+
+  it("refreshes when a watchlist product has no signal at all", async () => {
+    const fresh = new Date().toISOString();
+    m.latestSignals.mockResolvedValue([record("BTC-USD", fresh)]);
+    __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+
+    await latestSignalsWithSizing(limits);
+
+    expect(m.insertSignal).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns the stored signals when the automatic refresh fails", async () => {
+    const old = new Date(Date.now() - SIGNAL_REFRESH_AFTER_MS - 60_000).toISOString();
+    m.latestSignals.mockResolvedValue([record("BTC-USD", old), record("ETH-USD", old), record("SOL-USD", old)]);
+    __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    m.insertSignal.mockRejectedValue(new Error("db down"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const sized = await latestSignalsWithSizing(limits);
+
+    expect(sized.map((s) => s.evaluatedAt)).toEqual([old, old, old]);
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+});
+
+describe("refreshSignalsOnce", () => {
+  it("shares one refresh between overlapping callers", async () => {
+    __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    const [a, b] = await Promise.all([refreshSignalsOnce(USER), refreshSignalsOnce(USER)]);
+    expect(a).toBe(b);
+    expect(m.insertSignal).toHaveBeenCalledTimes(3);
+    await refreshSignalsOnce(USER);
+    expect(m.insertSignal).toHaveBeenCalledTimes(6);
   });
 });

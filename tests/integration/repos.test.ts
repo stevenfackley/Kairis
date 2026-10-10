@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, query } from "@/lib/server/db";
-import { getAssistedOrder, insertAssistedOrder, listAssistedOrders, listPendingAssistedOrders, updateAssistedOrder } from "@/lib/server/repos/assisted";
+import {
+  claimPreviewedOrder,
+  expireStalePreviews,
+  getAssistedOrder,
+  insertAssistedOrder,
+  listAssistedOrders,
+  listPendingAssistedOrders,
+  updateAssistedOrder
+} from "@/lib/server/repos/assisted";
 import { appendAudit, listAudit } from "@/lib/server/repos/audit";
 import { deleteConnection, getConnection, saveConnection } from "@/lib/server/repos/exchange";
 import { insertExport, listExports } from "@/lib/server/repos/exports";
@@ -143,6 +151,15 @@ describe.skipIf(!enabled)("repos", () => {
     expect(fresh).toMatchObject({ userId: "user-2", ...DEFAULT_LIMITS, perSymbolMaxUsd: {}, tradingPaused: true });
   });
 
+  it("saveLimits without a pause value keeps the stored pause, and a new row starts unpaused", async () => {
+    const limits = { maxPositionUsd: 900, dailyLossCapUsd: 100, maxTradesPerDay: 3, cooldownMinutes: 15, lossStreakTrigger: 2, perSymbolMaxUsd: {} };
+    await setTradingPaused(USER, true);
+    const kept = await saveLimits({ userId: USER, ...limits });
+    expect(kept).toMatchObject({ maxPositionUsd: 900, tradingPaused: true });
+    expect((await saveLimits({ userId: USER, ...limits, tradingPaused: false })).tradingPaused).toBe(false);
+    expect((await saveLimits({ userId: "user-3", ...limits })).tradingPaused).toBe(false);
+  });
+
   it("latestSignals returns the newest signal per product, ordered by product", async () => {
     await insertSignal(signal("ETH-USD", "2026-10-09T09:00:00.000Z", "old-eth"));
     const newestEth = await insertSignal(signal("ETH-USD", "2026-10-09T10:00:00.000Z", "new-eth"));
@@ -159,7 +176,20 @@ describe.skipIf(!enabled)("repos", () => {
     expect(await getSignal(newestEth.id)).toEqual(newestEth);
   });
 
-  it("insertPaperTrade + listPaperTrades map side, numbers and legacy planned rows", async () => {
+  it("insertSignal stores out-of-range and non-finite indicator values instead of failing the refresh", async () => {
+    const wild = await insertSignal({
+      ...signal("SOL-USD", "2026-10-09T12:00:00.000Z", "wild"),
+      action: "blocked",
+      strength: Number.NaN,
+      referencePrice: Number.POSITIVE_INFINITY,
+      atrPct: Number.POSITIVE_INFINITY,
+      rsi: 250,
+      spreadPct: 999_900
+    });
+    expect(wild).toMatchObject({ strength: 0, referencePrice: 0, atrPct: null, rsi: 100, spreadPct: 9999.9999 });
+  });
+
+  it("insertPaperTrade + listPaperTrades map side, numbers, fees and legacy planned rows", async () => {
     const base: PaperTrade = {
       id: "",
       userId: USER,
@@ -168,6 +198,7 @@ describe.skipIf(!enabled)("repos", () => {
       baseSize: 0.0123,
       price: 60000.5,
       quoteUsd: 738.01,
+      feeUsd: 4.42806369,
       status: "filled",
       realizedPnlUsd: 0,
       note: "entry",
@@ -177,7 +208,8 @@ describe.skipIf(!enabled)("repos", () => {
     };
     const buy = await insertPaperTrade(base);
     expect(buy.id).toMatch(/^[0-9a-f-]{36}$/);
-    await insertPaperTrade({ ...base, side: "SELL", price: 61000, quoteUsd: 750.3, realizedPnlUsd: 12.29, note: "exit", createdAt: "2026-10-09T11:00:00.000Z" });
+    expect(buy.feeUsd).toBe(4.42806369);
+    await insertPaperTrade({ ...base, side: "SELL", price: 61000, quoteUsd: 750.3, feeUsd: 4.5018, realizedPnlUsd: 12.29, note: "exit", createdAt: "2026-10-09T11:00:00.000Z" });
     await query(
       "insert into paper_trades (user_id, symbol, side, quantity, entry_price, status, created_at) values ($1, 'ETH-USD', 'buy', 1, 2000, 'planned', '2026-10-09T09:00:00Z')",
       [USER]
@@ -189,8 +221,8 @@ describe.skipIf(!enabled)("repos", () => {
       ["BUY", "filled", "entry"],
       ["BUY", "blocked", ""]
     ]);
-    expect(trades[0]).toMatchObject({ productId: "BTC-USD", baseSize: 0.0123, price: 61000, quoteUsd: 750.3, realizedPnlUsd: 12.29, riskDecision: decision });
-    expect(trades[2]).toMatchObject({ productId: "ETH-USD", quoteUsd: 0, riskDecision: null });
+    expect(trades[0]).toMatchObject({ productId: "BTC-USD", baseSize: 0.0123, price: 61000, quoteUsd: 750.3, feeUsd: 4.5018, realizedPnlUsd: 12.29, riskDecision: decision });
+    expect(trades[2]).toMatchObject({ productId: "ETH-USD", quoteUsd: 0, feeUsd: null, riskDecision: null });
     expect(await listPaperTrades(USER, 1)).toHaveLength(1);
   });
 
@@ -221,6 +253,23 @@ describe.skipIf(!enabled)("repos", () => {
     await expect(insertAssistedOrder(assisted({}))).rejects.toThrow();
   });
 
+  it("expireStalePreviews closes only old, unclaimed previews of that user", async () => {
+    const old = "2026-10-10T10:00:00.000Z";
+    const stale = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+    const claimed = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+    await claimPreviewedOrder(claimed.id, USER);
+    const fresh = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null }));
+    const other = await insertAssistedOrder(assisted({ userId: "user-2", status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+
+    expect(await expireStalePreviews(USER, "2026-10-10T11:00:00.000Z", "Preview expired.")).toBe(1);
+
+    expect(await getAssistedOrder(stale.id, USER)).toMatchObject({ status: "expired", reconcileState: "reconciled", detail: "Preview expired." });
+    expect((await getAssistedOrder(stale.id, USER))?.reconciledAt).not.toBeNull();
+    expect((await getAssistedOrder(claimed.id, USER))?.status).toBe("previewed");
+    expect((await getAssistedOrder(fresh.id, USER))?.status).toBe("previewed");
+    expect((await getAssistedOrder(other.id, "user-2"))?.status).toBe("previewed");
+  });
+
   it("saveConnection/getConnection round-trip the sealed secret; deleteConnection removes it", async () => {
     const sealed = { ciphertext: "c1", iv: "iv1", tag: "t1" };
     const saved = await saveConnection({
@@ -231,12 +280,13 @@ describe.skipIf(!enabled)("repos", () => {
       canTrade: true,
       canTransfer: false,
       portfolioUuid: null,
+      portfolioType: "CONSUMER",
       validatedAt: "2026-10-09T10:00:00.000Z",
       createdAt: "",
       sealed
     });
     expect(saved).not.toHaveProperty("sealed");
-    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, validatedAt: "2026-10-09T10:00:00.000Z" });
+    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, portfolioType: "CONSUMER", validatedAt: "2026-10-09T10:00:00.000Z" });
 
     const stored = await getConnection(USER);
     expect(stored).toEqual({ ...saved, sealed });

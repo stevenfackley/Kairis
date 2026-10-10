@@ -1,7 +1,9 @@
 import { openSecret, sealSecret } from "@/lib/domain/crypto";
 import { env } from "@/lib/env";
 import { createCoinbaseClient } from "@/lib/exchange/coinbase";
+import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
+import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
 import { createMockClient } from "@/lib/exchange/mock";
 import type { ExchangeClient, KeyPermissions } from "@/lib/exchange/types";
 import { appendAudit } from "@/lib/server/repos/audit";
@@ -21,26 +23,51 @@ async function setExchangeConnected(userId: string, exchangeConnected: boolean):
   });
 }
 
+// A refused connect is audited with the reason and the key id only; never any key material.
+async function refuse(userId: string, keyId: string, reason: string): Promise<never> {
+  const shownId = keyId.length > 0 && keyId.length <= 200 && !/PRIVATE KEY/.test(keyId) ? keyId : "(not shown)";
+  await appendAudit(userId, "exchange", "connect-failed", `Coinbase key ${shownId} refused: ${reason}`);
+  throw new Error(reason);
+}
+
 export async function connectCoinbase(userId: string, keyId: string, secretPem: string): Promise<ExchangeConnection> {
   if (!env.secretKey) {
     throw new Error("Exchange connections are disabled: KAIRIS_SECRET_KEY is not set.");
   }
-  const id = keyId.trim();
-  const secret = secretPem.trim();
-  if (!id || !secret) {
-    throw new Error("Both the API key name and the private key are required.");
+  const rawId = keyId.trim();
+
+  // Shape checks run locally, before any network call, and say which format was expected.
+  let creds: CoinbaseCredentials;
+  try {
+    creds = normalizeCoinbaseCredentials(keyId, secretPem);
+  } catch (error) {
+    if (error instanceof CoinbaseKeyFormatError) {
+      return refuse(userId, rawId, error.message);
+    }
+    throw error;
   }
+  const { keyId: id, secret, kind } = creds;
 
   let permissions: KeyPermissions;
   try {
     permissions = await createCoinbaseClient({ keyId: id, secret }).keyPermissions();
   } catch (error) {
     const normalized = normalizeExchangeError(error);
-    throw new Error(normalized.recommendation + " (" + normalized.code + ": " + normalized.message + ")");
+    return refuse(userId, id, `Kairis could not validate this key with Coinbase: ${normalized.message} ${normalized.recommendation}`);
   }
-  const { canView, canTrade, canTransfer, portfolioUuid } = permissions;
+  const { canView, canTrade, canTransfer, portfolioUuid, portfolioType } = permissions;
   if (canTransfer) {
-    throw new Error("This key can transfer funds. Kairis only accepts trade-only keys; create a new key without withdrawal or transfer permission.");
+    return refuse(userId, id, "This key can transfer funds. Kairis only accepts trade-only keys; create a new key without withdrawal or transfer permission.");
+  }
+  // Preview and order lookups need View; placing orders needs Trade. Refuse now rather than at the first order.
+  for (const [granted, name] of [[canTrade, "Trade"], [canView, "View"]] as const) {
+    if (!granted) {
+      return refuse(
+        userId,
+        id,
+        `This key has no ${name} permission. Kairis needs a key with View and Trade (and never Transfer); edit the key on the Coinbase Developer Platform or create a new one.`
+      );
+    }
   }
 
   const now = new Date().toISOString();
@@ -52,12 +79,13 @@ export async function connectCoinbase(userId: string, keyId: string, secretPem: 
     canTrade,
     canTransfer,
     portfolioUuid,
+    portfolioType,
     validatedAt: now,
     createdAt: now,
     sealed: sealSecret(secret, env.secretKey)
   });
   await setExchangeConnected(userId, true);
-  await appendAudit(userId, "exchange", "connected", `Coinbase key ${id} validated: view=${canView} trade=${canTrade}`);
+  await appendAudit(userId, "exchange", "connected", `Coinbase ${kind} key ${id} validated: view=${canView} trade=${canTrade}`);
   return connection;
 }
 
@@ -80,12 +108,14 @@ export async function getConnectionStatus(userId: string): Promise<ExchangeConne
     canTrade: stored.canTrade,
     canTransfer: stored.canTransfer,
     portfolioUuid: stored.portfolioUuid,
+    portfolioType: stored.portfolioType ?? null,
     validatedAt: stored.validatedAt,
     createdAt: stored.createdAt
   };
 }
 
-// The user's Coinbase key when one is stored and the server can open it; otherwise the mock provider.
+// The user's Coinbase key when one is stored and the server can open it; otherwise the mock provider,
+// which enforces the same Coinbase product rules so mock users meet the same refusals.
 export async function getExchangeClient(userId: string): Promise<ExchangeClient> {
   const stored = await getConnection(userId);
   if (stored && env.secretKey) {
@@ -97,5 +127,5 @@ export async function getExchangeClient(userId: string): Promise<ExchangeClient>
     }
     return createCoinbaseClient({ keyId: stored.keyId, secret });
   }
-  return createMockClient(getReferencePrice);
+  return createMockClient(getReferencePrice, undefined, getProductRules);
 }

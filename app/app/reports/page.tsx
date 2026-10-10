@@ -3,6 +3,7 @@ import { createExportAction } from "@/app/app/reports/actions";
 import { when } from "@/lib/format";
 import { firstString } from "@/lib/search-params";
 import { listExports } from "@/lib/server/repos/exports";
+import { EXPORT_LABEL, EXPORT_ROW_LIMIT } from "@/lib/server/services/exports";
 import { requireOnboarded } from "@/lib/server/session";
 import type { ExportType } from "@/lib/types";
 
@@ -14,11 +15,15 @@ const BUTTONS: ReadonlyArray<{ type: ExportType; label: string }> = [
   { type: "audit-log", label: "Export audit log" }
 ];
 
+const downloadHref = (id: string) => `/app/reports/download/${encodeURIComponent(id)}`;
+
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireOnboarded("/app/reports");
   const sp = await searchParams;
   const error = firstString(sp, "error");
+  const createdId = firstString(sp, "created");
   const exports = await listExports(user.id);
+  const created = createdId ? exports.find((x) => x.id === createdId) : undefined;
 
   return (
     <>
@@ -26,7 +31,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <p className="eyebrow">Reports</p>
         <h1>Exports</h1>
         <p className="lede">
-          CSV exports of your paper journal, assisted orders and audit log. Stored in R2 when configured, otherwise on the server&apos;s local disk.
+          CSV exports of your paper journal (fills, fees and realized P&amp;L), assisted orders and audit log, newest first,
+          up to {EXPORT_ROW_LIMIT.toLocaleString("en-US")} rows each. Only you can download your exports.
         </p>
       </header>
 
@@ -35,6 +41,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {error ? (
           <p className="error-copy" role="alert">
             {error}
+          </p>
+        ) : null}
+        {created ? (
+          <p className="success-copy" role="status">
+            {EXPORT_LABEL[created.type]} export created. <a href={downloadHref(created.id)}>Download it now</a> or from the list
+            below.
           </p>
         ) : null}
         <div className="button-row">
@@ -60,30 +72,20 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 <tr>
                   <th>Time</th>
                   <th>Type</th>
-                  <th>Storage</th>
-                  <th>Location</th>
+                  <th>Stored in</th>
+                  <th>File</th>
                 </tr>
               </thead>
               <tbody>
                 {exports.map((x) => (
                   <tr key={x.id}>
                     <td>{when(x.createdAt)}</td>
-                    <td>{x.type}</td>
+                    <td>{EXPORT_LABEL[x.type]}</td>
                     <td>
-                      <span className={`pill ${x.storage === "r2" ? "pill-ok" : "pill-warn"}`}>{x.storage}</span>
+                      <span className={`pill ${x.storage === "r2" ? "pill-ok" : "pill-warn"}`}>{x.storage === "r2" ? "R2" : "Server disk"}</span>
                     </td>
                     <td>
-                      {x.storage === "r2" && x.location.startsWith("http") ? (
-                        <a href={x.location} rel="noreferrer">
-                          Download
-                        </a>
-                      ) : (
-                        <>
-                          <code>{x.location}</code>
-                          <br />
-                          <span className="field-help">Local file on the server; ask the operator for it.</span>
-                        </>
-                      )}
+                      <a href={downloadHref(x.id)}>Download CSV</a>
                     </td>
                   </tr>
                 ))}
