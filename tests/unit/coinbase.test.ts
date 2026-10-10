@@ -14,6 +14,7 @@ import {
   mapSubmit
 } from "@/lib/exchange/coinbase";
 import { fetchCandles, fetchTicker, mapCandles, mapTicker } from "@/lib/exchange/coinbase-public";
+import { ExchangeHttpError, ExchangeTransportError, normalizeExchangeError } from "@/lib/exchange/errors";
 
 function stub(status: number, body: unknown) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -271,10 +272,41 @@ describe("createCoinbaseClient", () => {
     expect(call(f).url).toBe("https://api.coinbase.com/api/v3/brokerage/orders/historical/o1");
   });
 
-  it("throws with status on non-2xx", async () => {
-    await expect(createCoinbaseClient(creds, stub(401, "nope")).keyPermissions()).rejects.toThrow(
-      "Coinbase request failed (401): nope"
+  it("throws a readable typed error on non-2xx", async () => {
+    await expect(createCoinbaseClient(creds, stub(401, "Unauthorized")).keyPermissions()).rejects.toThrow(
+      "Coinbase rejected the API key (HTTP 401): Unauthorized."
     );
+    const body = { error: "PERMISSION_DENIED", error_details: "Missing required scopes", message: "Missing required scopes" };
+    const err = await createCoinbaseClient(creds, stub(403, body)).balances().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExchangeHttpError);
+    expect(err).toMatchObject({ status: 403, reason: "PERMISSION_DENIED", message: "Coinbase refused the request (HTTP 403): Missing required scopes." });
+    expect(normalizeExchangeError(await createCoinbaseClient(creds, stub(429, "")).balances().catch((e: unknown) => e))).toMatchObject({
+      code: "rate_limited",
+      retriable: true
+    });
+    expect(normalizeExchangeError(await createCoinbaseClient(creds, stub(503, "")).balances().catch((e: unknown) => e))).toMatchObject({
+      code: "provider_unavailable",
+      retriable: true,
+      ambiguous: true
+    });
+  });
+
+  it("passes a 10 s abort signal and maps a timeout or network failure to a transport error", async () => {
+    const f = stub(200, { accounts: [] });
+    await createCoinbaseClient(creds, f).balances();
+    expect(call(f).init.signal).toBeInstanceOf(AbortSignal);
+
+    const timeout = vi.fn(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+    const t = await createCoinbaseClient(creds, timeout).balances().catch((e: unknown) => e);
+    expect(t).toBeInstanceOf(ExchangeTransportError);
+    expect(t).toMatchObject({ kind: "timeout", message: "Coinbase did not answer within 10 s." });
+
+    const offline = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(await createCoinbaseClient(creds, offline).balances().catch((e: unknown) => e)).toMatchObject({ kind: "network" });
   });
 
   it("throws on malformed JSON", async () => {

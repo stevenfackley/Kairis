@@ -1,5 +1,6 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
-import { normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
+import { describeHttpFailure, ExchangeTransportError } from "@/lib/exchange/errors";
+import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
 import type {
   Balance,
   ExchangeClient,
@@ -14,6 +15,11 @@ import type {
 
 const apiHost = "api.coinbase.com";
 const basePath = "/api/v3/brokerage";
+const TIMEOUT_MS = 10_000;
+
+function isAbort(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -159,27 +165,45 @@ export function createCoinbaseClient(
 
   async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
     const { keyId, secret } = credentials();
-    const token = await generateJwt({
-      apiKeyId: keyId,
-      apiKeySecret: secret,
-      requestMethod: method,
-      requestHost: apiHost,
-      requestPath: path.split("?")[0]
-    });
-    const response = await fetchImpl(`https://${apiHost}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: "no-store"
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Coinbase request failed (${response.status}): ${text}`);
+    let token: string;
+    try {
+      // The uri claim is "METHOD host/path" without the query string (Coinbase JWT docs, coinbase-advanced-py format_jwt_uri).
+      token = await generateJwt({
+        apiKeyId: keyId,
+        apiKeySecret: secret,
+        requestMethod: method,
+        requestHost: apiHost,
+        requestPath: path.split("?")[0]
+      });
+    } catch {
+      throw new CoinbaseKeyFormatError("The stored Coinbase key could not sign a request. Reconnect the exchange with a fresh key.");
     }
-    return (await response.json()) as T;
+    let response: Response;
+    try {
+      response = await fetchImpl(`https://${apiHost}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+    } catch (error) {
+      if (isAbort(error)) {
+        throw new ExchangeTransportError("timeout", "Coinbase did not answer within 10 s.");
+      }
+      throw new ExchangeTransportError("network", "Kairis could not reach Coinbase (network error).");
+    }
+    if (!response.ok) {
+      throw describeHttpFailure(response.status, await response.text().catch(() => ""));
+    }
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new ExchangeTransportError("unreadable", "Coinbase sent a response Kairis could not read.");
+    }
   }
 
   return {

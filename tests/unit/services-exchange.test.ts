@@ -1,6 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateKeyBase64, openSecret, type Sealed } from "@/lib/domain/crypto";
+import { describeHttpFailure } from "@/lib/exchange/errors";
 import type { KeyPermissions } from "@/lib/exchange/types";
 import type { OnboardingState } from "@/lib/types";
 
@@ -91,12 +92,12 @@ describe("connectCoinbase", () => {
     const { connectCoinbase } = await load(generateKeyBase64());
     m.createCoinbaseClient.mockReturnValue({
       keyPermissions: async () => {
-        throw new Error("Coinbase request failed (401): unauthorized");
+        throw describeHttpFailure(401, "Unauthorized");
       }
     });
 
     await expect(connectCoinbase(USER, KEY_ID, PEM)).rejects.toThrow(
-      "Kairis could not validate this key with Coinbase: Coinbase request failed (401): unauthorized Check provider credentials, key permissions, and live-trading gating variables."
+      "Kairis could not validate this key with Coinbase: Coinbase rejected the API key (HTTP 401): Unauthorized. Check that the key id and private key come from the same Coinbase key, that the key is still active, and that any IP allowlist on the key includes this server."
     );
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "exchange", "connect-failed", expect.stringContaining(`Coinbase key ${KEY_ID} refused: Kairis could not validate`));
   });

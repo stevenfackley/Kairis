@@ -1,4 +1,5 @@
 import type { Candle, Ticker } from "@/lib/types";
+import { ExchangeHttpError, ExchangeTransportError, scrubSecrets } from "@/lib/exchange/errors";
 import type { FetchLike } from "@/lib/exchange/types";
 
 type Granularity = "ONE_HOUR" | "ONE_DAY" | "FIFTEEN_MINUTE";
@@ -74,19 +75,20 @@ function isTimeout(error: unknown): boolean {
 }
 
 async function getJson(fetchImpl: FetchLike, url: string): Promise<unknown> {
+  let response: Response;
   try {
-    const response = await fetchImpl(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Coinbase public request failed (${response.status}): ${body}`);
-    }
-    return (await response.json()) as unknown;
+    response = await fetchImpl(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (error) {
     if (isTimeout(error)) {
-      throw new Error(TIMEOUT_MESSAGE);
+      throw new ExchangeTransportError("timeout", TIMEOUT_MESSAGE);
     }
-    throw error;
+    throw new ExchangeTransportError("network", "Kairis could not reach Coinbase market data (network error).");
   }
+  if (!response.ok) {
+    const body = scrubSecrets((await response.text().catch(() => "")).trim()).slice(0, 200);
+    throw new ExchangeHttpError(response.status, `Coinbase public request failed (${response.status}): ${body}`, null);
+  }
+  return (await response.json()) as unknown;
 }
 
 export async function fetchCandles(
