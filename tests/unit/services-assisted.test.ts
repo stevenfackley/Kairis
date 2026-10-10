@@ -5,6 +5,7 @@ import type { AssistedOrder, TradingLimits } from "@/lib/types";
 
 const m = vi.hoisted(() => ({
   getAssistedOrder: vi.fn(),
+  claimPreviewedOrder: vi.fn(),
   updateAssistedOrder: vi.fn(),
   insertAssistedOrder: vi.fn(),
   listPendingAssistedOrders: vi.fn(),
@@ -20,6 +21,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock("@/lib/server/repos/assisted", () => ({
   getAssistedOrder: m.getAssistedOrder,
+  claimPreviewedOrder: m.claimPreviewedOrder,
   updateAssistedOrder: m.updateAssistedOrder,
   insertAssistedOrder: m.insertAssistedOrder,
   listPendingAssistedOrders: m.listPendingAssistedOrders,
@@ -100,10 +102,12 @@ async function load(liveEnabled: boolean) {
 }
 
 let current: AssistedOrder;
+let claimed = false;
 
 beforeEach(() => {
   vi.resetAllMocks();
   current = order();
+  claimed = false;
   m.getLimits.mockResolvedValue(limits);
   m.listPaperTrades.mockResolvedValue([]);
   m.listAssistedOrders.mockResolvedValue([]);
@@ -116,6 +120,13 @@ beforeEach(() => {
   m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
   m.getReferencePrice.mockResolvedValue(PRICE);
   m.getAssistedOrder.mockImplementation(async () => current);
+  m.claimPreviewedOrder.mockImplementation(async () => {
+    if (current.status !== "previewed" || claimed) {
+      return null;
+    }
+    claimed = true;
+    return current;
+  });
   m.updateAssistedOrder.mockImplementation(async (_id: string, patch: Partial<AssistedOrder>) => {
     current = { ...current, ...patch };
     return current;
@@ -129,8 +140,17 @@ afterEach(() => {
 describe("submitAssisted", () => {
   it("throws when the order does not exist", async () => {
     const { submitAssisted } = await load(false);
+    m.claimPreviewedOrder.mockResolvedValue(null);
     m.getAssistedOrder.mockResolvedValue(null);
     await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("Order not found.");
+  });
+
+  it("refuses an order another caller already claimed", async () => {
+    const { submitAssisted } = await load(true);
+    claimed = true;
+    await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("This order is already being submitted.");
+    expect(m.updateAssistedOrder).not.toHaveBeenCalled();
+    expect(m.getExchangeClient).not.toHaveBeenCalled();
   });
 
   it("refuses an order that is not in the previewed state", async () => {
@@ -174,6 +194,7 @@ describe("submitAssisted", () => {
     const result = await submitAssisted(USER, ORDER_ID);
 
     expect(result).toMatchObject({ status: "submitted", orderId: "mock-order-1", clientOrderId: ORDER_ID, reconcileState: "pending", reconciledAt: null });
+    expect(result.riskDecision?.outcome).toBe("approved");
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "assisted-order", "submitted", expect.stringContaining("BUY BTC-USD $100"));
   });
 

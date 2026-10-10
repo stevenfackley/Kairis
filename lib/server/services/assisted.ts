@@ -3,6 +3,7 @@ import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { createMockClient } from "@/lib/exchange/mock";
 import type { ExchangeClient, OrderPreview, OrderStatus, OrderSubmitResult } from "@/lib/exchange/types";
 import {
+  claimPreviewedOrder,
   getAssistedOrder,
   insertAssistedOrder,
   listPendingAssistedOrders,
@@ -92,17 +93,25 @@ export async function previewAssisted(
 
 // The Kairis order id doubles as the Coinbase client_order_id, so a retried submit cannot double-fill.
 export async function submitAssisted(userId: string, orderId: string): Promise<AssistedOrder> {
-  const order = await getAssistedOrder(orderId, userId);
+  const order = await claimPreviewedOrder(orderId, userId);
   if (!order) {
-    throw new Error("Order not found.");
+    const existing = await getAssistedOrder(orderId, userId);
+    if (!existing) {
+      throw new Error("Order not found.");
+    }
+    throw new Error(existing.status !== "previewed" ? "Only a previewed order can be submitted." : "This order is already being submitted.");
   }
-  if (order.status !== "previewed") {
-    throw new Error("Only a previewed order can be submitted.");
-  }
+  let submitDecision: RiskDecision | undefined;
   const block = async (detail: string) =>
     record(
       userId,
-      await updateAssistedOrder(order.id, { status: "blocked", reconcileState: "error", reconciledAt: new Date().toISOString(), detail }),
+      await updateAssistedOrder(order.id, {
+        status: "blocked",
+        reconcileState: "error",
+        reconciledAt: new Date().toISOString(),
+        detail,
+        riskDecision: submitDecision
+      }),
       "blocked"
     );
 
@@ -125,6 +134,7 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     mode: "live",
     signalId: order.signalId
   });
+  submitDecision = decision;
   if (decision.outcome !== "approved") {
     return block(decision.reasons.join(" "));
   }
@@ -164,7 +174,8 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     clientOrderId: order.id,
     reconcileState: result.success ? "pending" : "error",
     reconciledAt: result.success ? null : new Date().toISOString(),
-    detail: result.detail
+    detail: result.detail,
+    riskDecision: decision
   });
   return record(userId, submitted, submitted.status);
 }

@@ -65,6 +65,7 @@ alter table assisted_orders
   add column if not exists total_fees numeric(18,8),
   add column if not exists signal_id uuid,
   add column if not exists risk_decision jsonb,
+  add column if not exists submit_claimed_at timestamptz,
   add column if not exists updated_at timestamptz not null default now();
 
 alter table assisted_orders

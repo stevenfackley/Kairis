@@ -146,6 +146,22 @@ describe.skipIf(!enabled)("services", () => {
     expect(actions).toEqual(["previewed", "submitted"]);
   });
 
+  it("lets exactly one of two concurrent submits through", async () => {
+    const { order } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
+    const results = await Promise.allSettled([submitAssisted(USER, order.id), submitAssisted(USER, order.id)]);
+
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof submitAssisted>>> => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0].reason)).toMatch(/already being submitted/);
+    expect(fulfilled[0].value.status).toBe("submitted");
+
+    const rows = await query<{ order_id: string | null }>("select order_id from assisted_orders where order_id is not null");
+    expect(rows).toHaveLength(1);
+    expect((await getAssistedOrder(order.id, USER))?.riskDecision?.outcome).toBe("approved");
+  });
+
   it("writes a paper-journal export to a local CSV file with the header row", async () => {
     await placePaperOrder(USER, { productId: "ETH-USD", side: "BUY", quoteUsd: 25, note: "has, a comma" });
 
