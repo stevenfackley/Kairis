@@ -26,7 +26,7 @@ function ticketHref(path: "/app/paper" | "/app/trade", signal: SignalRecord & { 
 }
 
 /** "just now", "12 min ago", "3 h ago": how long ago the signal was evaluated. */
-function evaluatedAgo(evaluatedAt: string, nowMs: number): string {
+export function evaluatedAgo(evaluatedAt: string, nowMs: number): string {
   const ms = nowMs - Date.parse(evaluatedAt);
   if (!Number.isFinite(ms)) return MISSING;
   const minutes = Math.max(0, Math.floor(ms / 60_000));
@@ -35,11 +35,16 @@ function evaluatedAgo(evaluatedAt: string, nowMs: number): string {
   return `${Math.floor(minutes / 60)} h ago`;
 }
 
+/** True when the signal is older than the refresh window and should not be acted on. */
+export function isSignalStale(evaluatedAt: string, nowMs: number): boolean {
+  return nowMs - Date.parse(evaluatedAt) > STRATEGY.signalRefreshAfterMs;
+}
+
 type SignalCardProps = { signal: SignalRecord & { suggestedQuoteUsd: number }; mode: TradeMode; nowMs: number };
 
 export function SignalCard({ signal, mode, nowMs }: SignalCardProps) {
   const action = ACTION[signal.action];
-  const stale = nowMs - Date.parse(signal.evaluatedAt) > STRATEGY.signalRefreshAfterMs;
+  const stale = isSignalStale(signal.evaluatedAt, nowMs);
   // A failed market fetch is stored with price 0: say "n/a" rather than imply a $0 market.
   const hasMarket = signal.referencePrice > 0;
   const budgetPct = Math.round(STRATEGY.riskBudgetFraction * 100);
