@@ -66,7 +66,7 @@ describe("placePaperOrder", () => {
     expect(inserted.riskDecision).toEqual(decision);
     expect(inserted.note).toContain("max position");
     expect(trade.status).toBe("blocked");
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "risk", "blocked", expect.stringContaining("paper BUY BTC-USD $5000"));
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "risk", "blocked", expect.stringContaining("paper BUY BTC-USD $5,000.00"));
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "blocked", expect.stringContaining("max position"));
   });
 
@@ -100,7 +100,7 @@ describe("placePaperOrder", () => {
     expect(trade).toMatchObject({ status: "filled", price: PRICE, quoteUsd: 100, feeUsd: 0.6, realizedPnlUsd: 0, signalId: "sig-1", note: "" });
     expect(trade.baseSize).toBeCloseTo(0.002, 12);
     expect(trade.riskDecision).toEqual(decision);
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", expect.stringContaining("BUY 0.002 BTC-USD at $50000 ($100), fee $0.60"));
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", "BUY 0.002 BTC-USD at $50,000.00 ($100.00), fee $0.60, realized $0.00.");
   });
 
   it("rejects a fill too large for the size column with a readable error before inserting", async () => {

@@ -1,4 +1,6 @@
+import { usdPrice } from "@/lib/domain/money";
 import { fillPaperOrder } from "@/lib/domain/paper";
+import { num, usd } from "@/lib/format";
 import { appendAudit } from "@/lib/server/repos/audit";
 import { insertPaperTrade } from "@/lib/server/repos/paper";
 import { checkOrder } from "@/lib/server/services/risk";
@@ -42,18 +44,18 @@ export async function placePaperOrder(
       realizedPnlUsd: 0,
       note: userNote || decision.reasons.join(" ")
     });
-    detail = `${order.side} ${order.productId} $${order.quoteUsd} ${decision.outcome}: ${decision.reasons.join(" ")}`;
+    detail = `${order.side} ${order.productId} ${usd(order.quoteUsd)} ${decision.outcome}: ${decision.reasons.join(" ")}`;
   } else {
     const fill = fillPaperOrder(context.positions, order, context.referencePrice, undefined, { closePosition: sellAll === true });
     const unstorable = unstorableFillReason(order.productId, fill);
     if (unstorable) {
-      await appendAudit(userId, "paper-trade", "rejected", `${order.side} ${order.productId} $${order.quoteUsd}: ${unstorable}`);
+      await appendAudit(userId, "paper-trade", "rejected", `${order.side} ${order.productId} ${usd(order.quoteUsd)}: ${unstorable}`);
       throw new Error(unstorable);
     }
     trade = await insertPaperTrade({ ...base, status: "filled", ...fill, note: userNote });
     detail =
-      `${order.side} ${fill.baseSize} ${order.productId} at $${fill.price} ($${order.quoteUsd}), ` +
-      `fee $${fill.feeUsd.toFixed(2)}, realized $${fill.realizedPnlUsd.toFixed(2)}.`;
+      `${order.side} ${num(fill.baseSize, 8)} ${order.productId} at ${usdPrice(fill.price)} (${usd(order.quoteUsd)}), ` +
+      `fee ${usd(fill.feeUsd)}, realized ${usd(fill.realizedPnlUsd)}.`;
   }
   await appendAudit(userId, "paper-trade", trade.status, detail);
   return { trade, decision };

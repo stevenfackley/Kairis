@@ -1,6 +1,7 @@
 import { applyFill, buildPositions, dayStats, isFlat, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
 import { evaluateRisk } from "@/lib/domain/risk";
 import { STRATEGY } from "@/lib/domain/strategy";
+import { usd } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { appendAudit } from "@/lib/server/repos/audit";
 import { getLimits } from "@/lib/server/repos/limits";
@@ -126,7 +127,7 @@ export async function checkOrder(
     userId,
     "risk",
     decision.outcome,
-    `${resolved.mode} ${resolved.side} ${resolved.productId} $${resolved.quoteUsd}${opts.closePosition ? " (entire position)" : ""}: ${decision.reasons.join(" ") || "approved"}`
+    `${resolved.mode} ${resolved.side} ${resolved.productId} ${usd(resolved.quoteUsd)}${opts.closePosition ? " (entire position)" : ""}: ${decision.reasons.join(" ") || "approved"}`
   );
   return { decision, context, intent: resolved };
 }

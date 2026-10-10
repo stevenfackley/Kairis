@@ -1,3 +1,4 @@
+import { usdPrice } from "@/lib/domain/money";
 import { num, usd } from "@/lib/format";
 import type { PositionMap } from "@/lib/types";
 
@@ -50,9 +51,9 @@ export function PositionsTable({ positions, prices }: PositionsTableProps) {
               <tr key={productId}>
                 <td>{productId}</td>
                 <td className="num">{num(position.baseSize, 8)}</td>
-                <td className="num">{usd(position.avgCost)}</td>
+                <td className="num">{usdPrice(position.avgCost)}</td>
                 <td className="num">{usd(costBasis)}</td>
-                <td className="num">{mark === null ? NO_PRICE : usd(mark)}</td>
+                <td className="num">{mark === null ? NO_PRICE : usdPrice(mark)}</td>
                 <td className="num">{value === null ? NO_PRICE : usd(value)}</td>
                 <td className="num">
                   {pnl === null ? (

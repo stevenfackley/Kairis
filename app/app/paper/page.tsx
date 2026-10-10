@@ -7,6 +7,7 @@ import { PositionsTable } from "@/components/positions-table";
 import { isUuid, MAX_TICKET_USD, normalizeProductId } from "@/lib/domain/order-form";
 import { buildPositions, dayStats } from "@/lib/domain/paper";
 import { PAPER_TAKER_FEE_RATE, WATCHLIST } from "@/lib/domain/strategy";
+import { usdPrice } from "@/lib/domain/money";
 import { num, usd, when } from "@/lib/format";
 import { getLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
@@ -179,7 +180,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
                       <td>{trade.productId}</td>
                       <td>{trade.side}</td>
                       <td className="num">{filled ? num(trade.baseSize, 8) : "n/a"}</td>
-                      <td className="num">{trade.price > 0 ? usd(trade.price) : "n/a"}</td>
+                      <td className="num">{trade.price > 0 ? usdPrice(trade.price) : "n/a"}</td>
                       <td className="num">{usd(trade.quoteUsd)}</td>
                       <td className="num">{filled ? usd(trade.feeUsd ?? 0) : "n/a"}</td>
                       <td className="num">{filled ? signedUsd(trade.realizedPnlUsd) : "n/a"}</td>

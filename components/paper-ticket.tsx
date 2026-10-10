@@ -5,6 +5,7 @@ import { placePaperOrderAction } from "@/app/app/paper/actions";
 import { INITIAL_PAPER_TICKET_STATE, type PaperTicketState } from "@/app/app/paper/state";
 import { RiskDecisionView } from "@/components/risk-decision";
 import { CUSTOM_PRODUCT, MAX_NOTE_LENGTH, MAX_TICKET_USD, SELL_ALL_INTENT } from "@/lib/domain/order-form";
+import { usdPrice } from "@/lib/domain/money";
 import { num, usd } from "@/lib/format";
 
 type PaperTicketProps = {
@@ -21,7 +22,7 @@ function resultLine({ trade, decision }: Result): string {
     const verb = trade.side === "BUY" ? "bought" : "sold";
     const fee = ` Fee ${usd(trade.feeUsd ?? 0)}.`;
     const pnl = trade.side === "SELL" ? ` Realized ${usd(trade.realizedPnlUsd)} after fees.` : "";
-    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usd(trade.price)}.${fee}${pnl}`;
+    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usdPrice(trade.price)}.${fee}${pnl}`;
   }
   const label = decision.outcome === "halted" ? "Halted" : "Blocked";
   return `${label}: ${decision.reasons[0] ?? "a risk check failed."} Nothing was filled; the attempt is in your journal.`;
