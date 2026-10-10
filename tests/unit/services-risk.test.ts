@@ -99,9 +99,37 @@ describe("buildRiskContext (live)", () => {
     expect(ctx.today.tradesCount).toBe(3);
   });
 
-  it("treats an in-flight order with no reported fee as fee-free until it reconciles", async () => {
-    m.listAssistedOrders.mockResolvedValue([order({ status: "submitted", filledSize: null, averagePrice: null, totalFees: null, quoteUsd: 50 })]);
+  it("estimates an in-flight buy as Coinbase will fill it: the submitted quote includes the fee", async () => {
+    const inFlight = { status: "submitted" as const, filledSize: null, averagePrice: null, totalFees: null };
+    // The size submitted wins over the dollars on the row: $50 buys 50 / 1.006 / 100 = 0.49701789 BTC.
+    m.listAssistedOrders.mockResolvedValue([order({ ...inFlight, quoteUsd: 50.004, orderSize: { kind: "quote", quoteSize: "50" } })]);
+    const sized = await buildRiskContext(USER, "live", "BTC-USD");
+    expect(sized.positions["BTC-USD"]?.baseSize).toBe(0.49701789);
+    // The estimated fee is in the cost basis, so the basis is the $50 spent.
+    expect(sized.positions["BTC-USD"]!.baseSize * sized.positions["BTC-USD"]!.avgCost).toBeCloseTo(50, 6);
+
+    // Without a recorded size (rows from before sizes were stored), the order's dollars are used.
+    m.listAssistedOrders.mockResolvedValue([order({ ...inFlight, quoteUsd: 50 })]);
+    expect((await buildRiskContext(USER, "live", "BTC-USD")).positions["BTC-USD"]?.baseSize).toBe(0.49701789);
+  });
+
+  it("estimates an in-flight sell by the coins submitted, its fee off the proceeds", async () => {
+    const t0 = new Date(Date.now() - 60_000).toISOString();
+    m.listAssistedOrders.mockResolvedValue([
+      order({ id: "buy", side: "BUY", filledSize: 1, averagePrice: 100, totalFees: 0.6, createdAt: t0 }),
+      order({ id: "sell", side: "SELL", status: "submitted", filledSize: null, averagePrice: null, totalFees: null, quoteUsd: 40, orderSize: { kind: "base", baseSize: "0.4" } })
+    ]);
     const ctx = await buildRiskContext(USER, "live", "BTC-USD");
-    expect(ctx.positions["BTC-USD"]).toMatchObject({ baseSize: 0.5, avgCost: 100 });
+    expect(ctx.positions["BTC-USD"]?.baseSize).toBeCloseTo(0.6, 10);
+    // 0.4 * 100 - 0.24 estimated fee - 0.4 * 100.60 cost = -0.48.
+    expect(ctx.today.realizedPnlUsd).toBeCloseTo(-0.48, 10);
+  });
+
+  it("charges what Coinbase reports once an order has filled, not the estimate", async () => {
+    // A $100 buy as Coinbase fills it: 99.40357853 of coins and a 0.59642147 fee.
+    m.listAssistedOrders.mockResolvedValue([order({ filledSize: 0.99403579, averagePrice: 100, totalFees: 0.59642147, orderSize: { kind: "quote", quoteSize: "100" } })]);
+    const ctx = await buildRiskContext(USER, "live", "BTC-USD");
+    expect(ctx.positions["BTC-USD"]?.baseSize).toBe(0.99403579);
+    expect(ctx.positions["BTC-USD"]!.baseSize * ctx.positions["BTC-USD"]!.avgCost).toBeCloseTo(100, 6);
   });
 });

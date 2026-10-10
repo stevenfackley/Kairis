@@ -19,12 +19,14 @@ export const STRATEGY = {
   // Stored signals older than this are re-evaluated on Signals or dashboard load, and shown as stale.
   signalRefreshAfterMs: 15 * 60 * 1000
 } as const;
+/** Coinbase Advanced's entry-tier taker fee, what a market order pays at the lowest volume tier. */
+export const TAKER_FEE_RATE = 0.006;
 /**
  * Simulated taker fee on every paper fill (Coinbase Advanced's entry-tier taker rate). As on Coinbase, a
  * buy's dollar size includes its fee (the fee goes into the cost basis) and a sell's fee comes out of the
  * proceeds, so a flat round trip loses ~1.19 %, as it would live.
  */
-export const PAPER_TAKER_FEE_RATE = 0.006;
+export const PAPER_TAKER_FEE_RATE = TAKER_FEE_RATE;
 /** A base size smaller than this is floating-point dust: the position counts as flat everywhere. */
 export const DUST_BASE_SIZE = 1e-9;
 export const DEFAULT_LIMITS = { maxPositionUsd: 1500, dailyLossCapUsd: 300, maxTradesPerDay: 6, cooldownMinutes: 20, lossStreakTrigger: 2 } as const;

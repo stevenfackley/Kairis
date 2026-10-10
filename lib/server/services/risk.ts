@@ -1,6 +1,6 @@
 import { applyFill, buildPositions, dayStats, isFlat, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
 import { evaluateRisk } from "@/lib/domain/risk";
-import { STRATEGY } from "@/lib/domain/strategy";
+import { STRATEGY, TAKER_FEE_RATE } from "@/lib/domain/strategy";
 import { usd } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { appendAudit } from "@/lib/server/repos/audit";
@@ -39,18 +39,41 @@ function liveExposure(order: AssistedOrder): boolean {
   return partial && (order.filledSize ?? 0) > 0;
 }
 
+/**
+ * Coins and fee of an in-flight order Coinbase has not reported a fill for yet, estimated the way Coinbase
+ * will charge it at the entry-tier taker rate. A quote-sized BUY spends its quote including the fee, so it
+ * gets quote / (1 + rate) / price coins (quote / price would overstate them by the fee) and its cost basis
+ * stays the quote; a coin-sized order is exactly its base size and a sell pays the fee out of its proceeds.
+ * The size recorded at preview (the one submitted) is used when present, else the order's dollars.
+ */
+function inFlightEstimate(order: AssistedOrder, price: number): { baseSize: number; feeUsd: number } {
+  if (!(price > 0)) return { baseSize: 0, feeUsd: 0 };
+  const size = order.orderSize;
+  if (size?.kind === "base") {
+    const baseSize = Number(size.baseSize);
+    return { baseSize, feeUsd: baseSize * price * TAKER_FEE_RATE };
+  }
+  const quote = size?.kind === "quote" ? Number(size.quoteSize) : order.quoteUsd;
+  if (order.side === "BUY") {
+    const filledValue = quote / (1 + TAKER_FEE_RATE);
+    return { baseSize: filledValue / price, feeUsd: quote - filledValue };
+  }
+  return { baseSize: quote / price, feeUsd: quote * TAKER_FEE_RATE };
+}
+
 // Live P&L is rebuilt from the orders Kairis itself recorded, in time order. Trades made outside Kairis
 // (the Coinbase app, other bots) are invisible here, so live limits apply to Kairis trades only.
 // Exchange-reported fees are charged the same way as paper fees: a buy's fee goes into the cost basis
-// (so a buy never realizes a loss) and a sell's fee comes out of its proceeds. An in-flight order has
-// no reported fee yet and counts as fee-free until reconcile records one.
+// (so a buy never realizes a loss) and a sell's fee (Coinbase's totalFees) comes out of its proceeds. An
+// in-flight order is estimated (inFlightEstimate) until reconcile records what Coinbase reports.
 function liveFills(exposure: AssistedOrder[], prices: Record<string, number>): Fill[] {
   const fills: Fill[] = [];
   const lots: Record<string, Lot> = {};
   for (const order of sortByTime(exposure)) {
     const price = order.averagePrice ?? prices[order.productId] ?? 0;
-    const baseSize = order.filledSize ?? (price > 0 ? order.quoteUsd / price : 0);
-    const feeUsd = order.totalFees ?? 0;
+    const estimate = order.filledSize === null ? inFlightEstimate(order, price) : null;
+    const baseSize = estimate ? estimate.baseSize : (order.filledSize ?? 0);
+    const feeUsd = estimate ? estimate.feeUsd : (order.totalFees ?? 0);
     const realizedPnlUsd = order.side === "SELL" && price > 0 && baseSize > 0 ? realizeSell(lots[order.productId], baseSize, price, feeUsd) : 0;
     const fill: Fill = { productId: order.productId, side: order.side, baseSize, price, feeUsd, realizedPnlUsd, createdAt: order.createdAt, status: "filled" };
     applyFill(lots, fill);

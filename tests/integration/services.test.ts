@@ -200,9 +200,10 @@ describe.skipIf(!enabled)("services", () => {
     expect(submitted.orderId).toBeTruthy();
     await expect(submitAssisted(USER, order.id)).rejects.toThrow("Only a previewed order can be submitted.");
 
-    // An in-flight order already counts toward exposure before reconcile runs.
+    // An in-flight order already counts toward exposure before reconcile runs, estimated as Coinbase will
+    // fill it: the $50 includes the fee, so 50 / 1.006 / 100 coins.
     const inFlight = await buildRiskContext(USER, "live", "BTC-USD");
-    expect(inFlight.positions["BTC-USD"]?.baseSize).toBeCloseTo(0.5, 8);
+    expect(inFlight.positions["BTC-USD"]?.baseSize).toBe(0.49701789);
     expect(inFlight.today.tradesCount).toBe(1);
 
     expect(await reconcileAssisted(USER)).toEqual({ checked: 1, updated: 1 });
