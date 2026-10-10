@@ -52,12 +52,16 @@ export type RiskContext = {
   dataAgeMs: number;
   maxDataAgeMs: number;
   providerDegraded: boolean;
+  /** Coinbase does not list the product (its market endpoints answered "not found"): blocked, not halted. */
+  unknownProduct?: boolean;
   now: Date;
 };
 
 export type PaperTradeStatus = "filled" | "blocked";
 export type PaperTrade = {
   id: string; userId: string; productId: ProductId; side: Side; baseSize: number; price: number; quoteUsd: number;
+  /** Simulated taker fee in USD; null on blocked rows and on fills recorded before fees were modeled. */
+  feeUsd: number | null;
   status: PaperTradeStatus; realizedPnlUsd: number; note: string; signalId: string | null; riskDecision: RiskDecision | null; createdAt: string;
 };
 

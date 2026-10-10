@@ -24,7 +24,7 @@ import { listExports } from "@/lib/server/repos/exports";
 import { saveLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
 import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
-import { createExport } from "@/lib/server/services/exports";
+import { createExport, openExportDownload } from "@/lib/server/services/exports";
 import { __setMarketFetchers } from "@/lib/server/services/market";
 import { placePaperOrder } from "@/lib/server/services/paper";
 import { buildRiskContext } from "@/lib/server/services/risk";
@@ -92,7 +92,7 @@ describe.skipIf(!enabled)("services", () => {
 
     const first = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
     expect(first.decision.outcome).toBe("approved");
-    expect(first.trade).toMatchObject({ status: "filled", baseSize: 6, price: PRICE, quoteUsd: 600 });
+    expect(first.trade).toMatchObject({ status: "filled", baseSize: 6, price: PRICE, quoteUsd: 600, feeUsd: 3.6 });
     expect(first.trade.id).toMatch(/^[0-9a-f-]{36}$/);
 
     const second = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
@@ -107,8 +107,23 @@ describe.skipIf(!enabled)("services", () => {
     expect(await listAudit(USER, { category: "risk" })).toHaveLength(2);
 
     const context = await buildRiskContext(USER, "paper", "BTC-USD");
-    expect(context.positions["BTC-USD"]).toMatchObject({ baseSize: 6, avgCost: PRICE, notionalUsd: 600 });
+    // The 0.6% buy fee ($3.60) is part of the cost basis: (600 + 3.60) / 6 = 100.60.
+    expect(context.positions["BTC-USD"]).toMatchObject({ baseSize: 6, notionalUsd: 600 });
+    expect(context.positions["BTC-USD"]?.avgCost).toBeCloseTo(100.6, 10);
     expect(context.today.tradesCount).toBe(1);
+  });
+
+  it("sells an entire paper position exactly, net of both fees, and leaves it flat", async () => {
+    await placePaperOrder(USER, { productId: "SOL-USD", side: "BUY", quoteUsd: 33.33 });
+    const closed = await placePaperOrder(USER, { productId: "SOL-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+
+    expect(closed.decision.outcome).toBe("approved");
+    expect(closed.trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.3333, quoteUsd: 33.33 });
+    // Flat at the same price: both 0.6% fees are lost, 2 x 0.19998 = 0.39996, stored to the cent.
+    expect(closed.trade.realizedPnlUsd).toBe(-0.4);
+    const context = await buildRiskContext(USER, "paper", "SOL-USD");
+    expect(context.positions["SOL-USD"]).toBeUndefined();
+    expect(context.today).toMatchObject({ tradesCount: 2, consecutiveLosses: 1 });
   });
 
   it("previews and submits through the mock provider, then reconcile marks the order filled", async () => {
@@ -164,10 +179,17 @@ describe.skipIf(!enabled)("services", () => {
     expect(artifact.location.startsWith(path.resolve(repoRoot, scratchDir, "exports"))).toBe(true);
     expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}\.csv$/);
     const lines = (await readFile(artifact.location, "utf8")).split("\n");
-    expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,status,realizedPnlUsd,signalId,note");
+    expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,feeUsd,status,realizedPnlUsd,signalId,note");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain(",ETH-USD,BUY,0.25,100,25,filled,0,,\"has, a comma\"");
+    expect(lines[1]).toContain(",ETH-USD,BUY,0.25,100,25,0.15,filled,0,,\"has, a comma\"");
     expect(await listExports(USER)).toEqual([artifact]);
     expect(await listAudit(USER, { category: "export" })).toHaveLength(1);
+
+    const download = await openExportDownload(USER, artifact.id);
+    if (!download.ok) throw new Error(download.message);
+    expect(download.fileName).toBe(path.basename(artifact.location));
+    expect(await new Response(download.body).text()).toBe(await readFile(artifact.location, "utf8"));
+    expect(await openExportDownload("someone-else", artifact.id)).toMatchObject({ ok: false, status: 404 });
+    expect((await listAudit(USER, { category: "export" })).map((e) => e.action).sort()).toEqual(["created", "downloaded"]);
   });
 });

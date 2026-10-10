@@ -69,6 +69,16 @@ export function toNumberRecord(value: unknown): Record<string, number> {
   return out;
 }
 
+/**
+ * A value for a numeric(p,s) column whose integer part holds at most `maxAbs`: non-finite becomes null,
+ * anything larger is clamped to the column's limit, so an insert never fails with "numeric field
+ * overflow" and NaN or Infinity never reaches the database.
+ */
+export function toNumericParam(value: number | null, maxAbs: number): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.max(-maxAbs, Math.min(maxAbs, value));
+}
+
 // jsonb params go over the wire as JSON text: pg would otherwise turn JS arrays into Postgres arrays.
 export function toJsonParam(value: unknown): string | null {
   return value === null || value === undefined ? null : JSON.stringify(value);
