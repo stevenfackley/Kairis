@@ -7,6 +7,8 @@ export type KeyPermissions = {
   canTrade: boolean;
   canTransfer: boolean;
   portfolioUuid: string | null;
+  /** DEFAULT, CONSUMER or INTX for a portfolio-scoped key; null when Coinbase does not say. */
+  portfolioType: string | null;
 };
 
 export type Balance = { currency: string; available: number };

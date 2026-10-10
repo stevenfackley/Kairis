@@ -44,7 +44,7 @@ const onboarding: OnboardingState = {
 };
 
 function permissions(overrides: Partial<KeyPermissions> = {}): KeyPermissions {
-  return { canView: true, canTrade: true, canTransfer: false, portfolioUuid: "pf-1", ...overrides };
+  return { canView: true, canTrade: true, canTransfer: false, portfolioUuid: "pf-1", portfolioType: "DEFAULT", ...overrides };
 }
 
 async function load(secretKey: string) {
@@ -100,6 +100,26 @@ describe("connectCoinbase", () => {
       "Kairis could not validate this key with Coinbase: Coinbase rejected the API key (HTTP 401): Unauthorized. Check that the key id and private key come from the same Coinbase key, that the key is still active, and that any IP allowlist on the key includes this server."
     );
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "exchange", "connect-failed", expect.stringContaining(`Coinbase key ${KEY_ID} refused: Kairis could not validate`));
+  });
+
+  it("refuses a key without Trade or View permission at connect time", async () => {
+    const { connectCoinbase } = await load(generateKeyBase64());
+    m.createCoinbaseClient.mockReturnValue({ keyPermissions: async () => permissions({ canTrade: false }) });
+    await expect(connectCoinbase(USER, KEY_ID, PEM)).rejects.toThrow(
+      "This key has no Trade permission. Kairis needs a key with View and Trade (and never Transfer); edit the key on the Coinbase Developer Platform or create a new one."
+    );
+    m.createCoinbaseClient.mockReturnValue({ keyPermissions: async () => permissions({ canView: false }) });
+    await expect(connectCoinbase(USER, KEY_ID, PEM)).rejects.toThrow("This key has no View permission.");
+    expect(m.saveConnection).not.toHaveBeenCalled();
+    expect(m.saveOnboarding).not.toHaveBeenCalled();
+    expect(m.appendAudit.mock.calls.filter((c) => c[2] === "connect-failed")).toHaveLength(2);
+  });
+
+  it("stores the portfolio uuid and type a portfolio-scoped key reports", async () => {
+    const { connectCoinbase } = await load(generateKeyBase64());
+    m.createCoinbaseClient.mockReturnValue({ keyPermissions: async () => permissions({ portfolioUuid: "pf-9", portfolioType: "CONSUMER" }) });
+    await connectCoinbase(USER, KEY_ID, PEM);
+    expect(m.saveConnection.mock.calls[0]![0]).toMatchObject({ portfolioUuid: "pf-9", portfolioType: "CONSUMER" });
   });
 
   it("audits every refused connect with the reason and key id but no key material", async () => {

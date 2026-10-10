@@ -75,7 +75,7 @@ export type AuditEvent = { id: string; userId: string; category: AuditCategory; 
 
 export type ExchangeConnection = {
   userId: string; provider: "coinbase"; keyId: string; canView: boolean; canTrade: boolean; canTransfer: boolean;
-  portfolioUuid: string | null; validatedAt: string; createdAt: string;
+  portfolioUuid: string | null; portfolioType?: string | null; validatedAt: string; createdAt: string;
 };
 
 export type ExportType = "paper-journal" | "assisted-orders" | "audit-log";

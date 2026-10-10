@@ -17,7 +17,8 @@ describe("mock exchange", () => {
       canView: true,
       canTrade: false,
       canTransfer: false,
-      portfolioUuid: null
+      portfolioUuid: null,
+      portfolioType: null
     });
     expect(await c.balances()).toEqual([{ currency: "USD", available: 10000 }]);
   });

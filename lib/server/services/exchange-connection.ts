@@ -54,9 +54,19 @@ export async function connectCoinbase(userId: string, keyId: string, secretPem: 
     const normalized = normalizeExchangeError(error);
     return refuse(userId, id, `Kairis could not validate this key with Coinbase: ${normalized.message} ${normalized.recommendation}`);
   }
-  const { canView, canTrade, canTransfer, portfolioUuid } = permissions;
+  const { canView, canTrade, canTransfer, portfolioUuid, portfolioType } = permissions;
   if (canTransfer) {
     return refuse(userId, id, "This key can transfer funds. Kairis only accepts trade-only keys; create a new key without withdrawal or transfer permission.");
+  }
+  // Preview and order lookups need View; placing orders needs Trade. Refuse now rather than at the first order.
+  for (const [granted, name] of [[canTrade, "Trade"], [canView, "View"]] as const) {
+    if (!granted) {
+      return refuse(
+        userId,
+        id,
+        `This key has no ${name} permission. Kairis needs a key with View and Trade (and never Transfer); edit the key on the Coinbase Developer Platform or create a new one.`
+      );
+    }
   }
 
   const now = new Date().toISOString();
@@ -68,6 +78,7 @@ export async function connectCoinbase(userId: string, keyId: string, secretPem: 
     canTrade,
     canTransfer,
     portfolioUuid,
+    portfolioType,
     validatedAt: now,
     createdAt: now,
     sealed: sealSecret(secret, env.secretKey)
@@ -96,6 +107,7 @@ export async function getConnectionStatus(userId: string): Promise<ExchangeConne
     canTrade: stored.canTrade,
     canTransfer: stored.canTransfer,
     portfolioUuid: stored.portfolioUuid,
+    portfolioType: stored.portfolioType ?? null,
     validatedAt: stored.validatedAt,
     createdAt: stored.createdAt
   };

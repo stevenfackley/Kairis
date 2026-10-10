@@ -231,12 +231,13 @@ describe.skipIf(!enabled)("repos", () => {
       canTrade: true,
       canTransfer: false,
       portfolioUuid: null,
+      portfolioType: "CONSUMER",
       validatedAt: "2026-10-09T10:00:00.000Z",
       createdAt: "",
       sealed
     });
     expect(saved).not.toHaveProperty("sealed");
-    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, validatedAt: "2026-10-09T10:00:00.000Z" });
+    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, portfolioType: "CONSUMER", validatedAt: "2026-10-09T10:00:00.000Z" });
 
     const stored = await getConnection(USER);
     expect(stored).toEqual({ ...saved, sealed });

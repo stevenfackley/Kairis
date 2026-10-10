@@ -77,6 +77,12 @@ export default async function ExchangePage() {
               <span>Portfolio id</span>
               <strong>{connection.portfolioUuid ? <code>{connection.portfolioUuid}</code> : "Default portfolio"}</strong>
             </div>
+            {connection.portfolioType ? (
+              <div className="status-row">
+                <span>Portfolio type</span>
+                <strong>{connection.portfolioType}</strong>
+              </div>
+            ) : null}
             <div className="status-row">
               <span>Validated at</span>
               <strong>{when(connection.validatedAt)}</strong>

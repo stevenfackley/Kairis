@@ -52,7 +52,8 @@ export function mapKeyPermissions(json: unknown): KeyPermissions {
     canView: json.can_view === true,
     canTrade: json.can_trade === true,
     canTransfer: json.can_transfer === true,
-    portfolioUuid: optStr(json.portfolio_uuid)
+    portfolioUuid: optStr(json.portfolio_uuid),
+    portfolioType: json.portfolio_type === "UNDEFINED" ? null : optStr(json.portfolio_type)
   };
 }
 

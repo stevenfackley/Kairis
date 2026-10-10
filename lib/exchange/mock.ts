@@ -13,7 +13,7 @@ export function createMockClient(
   return {
     provider: "mock",
     async keyPermissions() {
-      return { canView: true, canTrade: false, canTransfer: false, portfolioUuid: null };
+      return { canView: true, canTrade: false, canTransfer: false, portfolioUuid: null, portfolioType: null };
     },
     async balances() {
       return [{ currency: "USD", available: 10000 }];

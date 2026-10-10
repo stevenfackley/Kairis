@@ -113,13 +113,17 @@ describe("public fetchers", () => {
 
 describe("authed mappers", () => {
   it("mapKeyPermissions", () => {
-    expect(mapKeyPermissions({ can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "p-1" })).toEqual({
+    // Shaped like the documented GET /api/v3/brokerage/key_permissions response.
+    expect(mapKeyPermissions({ can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "p-1", portfolio_type: "CONSUMER" })).toEqual({
       canView: true,
       canTrade: false,
       canTransfer: false,
-      portfolioUuid: "p-1"
+      portfolioUuid: "p-1",
+      portfolioType: "CONSUMER"
     });
-    expect(mapKeyPermissions({ can_view: true, can_trade: true, can_transfer: true }).portfolioUuid).toBeNull();
+    expect(mapKeyPermissions({ can_view: true, can_trade: true, can_transfer: true })).toMatchObject({ portfolioUuid: null, portfolioType: null });
+    // UNDEFINED is the enum's default, not a portfolio type.
+    expect(mapKeyPermissions({ can_view: true, portfolio_type: "UNDEFINED" }).portfolioType).toBeNull();
     expect(() => mapKeyPermissions("x")).toThrow();
   });
 
