@@ -67,7 +67,7 @@ async function buildCsv(userId: string, type: ExportType): Promise<string> {
 
 export function exportFileName(type: ExportType, userId: string, now: Date): string {
   const safeUser = userId.toLowerCase().replace(/[^a-z0-9-]/g, "-") || "user";
-  return `${type}-${safeUser}-${now.toISOString().replaceAll(":", "-")}.csv`;
+  return `${type}-${safeUser}-${now.toISOString().replaceAll(":", "-")}-${crypto.randomUUID().slice(0, 8)}.csv`;
 }
 
 export async function createExport(userId: string, type: ExportType): Promise<ExportArtifact> {

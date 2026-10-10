@@ -170,7 +170,7 @@ describe.skipIf(!enabled)("services", () => {
     expect(artifact).toMatchObject({ userId: USER, type: "paper-journal", storage: "local" });
     expect(path.isAbsolute(artifact.location)).toBe(true);
     expect(artifact.location.startsWith(path.resolve(repoRoot, scratchDir, "exports"))).toBe(true);
-    expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.csv$/);
+    expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}\.csv$/);
     const lines = (await readFile(artifact.location, "utf8")).split("\n");
     expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,status,realizedPnlUsd,signalId,note");
     expect(lines).toHaveLength(2);
