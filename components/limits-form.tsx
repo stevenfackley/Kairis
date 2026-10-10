@@ -22,28 +22,28 @@ const FIELDS: Array<{ name: NumberField; label: string; help: string; step: stri
     name: "dailyLossCapUsd",
     label: "Daily loss cap (USD)",
     help:
-      "Counts realized P&L only: closed trades (sells), net of fees. Losses on positions you still hold do not count. When realized losses today (UTC) reach this amount, new orders wait until 00:00 UTC.",
+      "Counts realized P&L only: closed trades (sells), net of fees. Losses on positions you still hold do not count. When realized losses today (UTC) reach this amount, new buys wait until 00:00 UTC. Sells that reduce a position are always allowed.",
     step: "0.01",
     min: "0.01"
   },
   {
     name: "maxTradesPerDay",
     label: "Max trades per day",
-    help: "Filled orders allowed per UTC day, counted separately for paper and live. Blocked attempts do not count.",
+    help: "Filled orders allowed per UTC day, counted separately for paper and live. Blocked attempts do not count. Sells still count, but are never blocked by this limit.",
     step: "1",
     min: "1"
   },
   {
     name: "cooldownMinutes",
     label: "Cooldown minutes after a loss streak",
-    help: "How long new orders wait after the last loss in a streak, counted from that loss.",
+    help: "How long new buys wait after the last loss in a streak, counted from that loss (it runs across midnight). Exits are never blocked.",
     step: "1",
     min: "1"
   },
   {
     name: "lossStreakTrigger",
     label: "Loss streak trigger",
-    help: "Losing sells in a row within the same UTC day (fees included) that start the cooldown. A buy is never a loss.",
+    help: "Losing sells in a row (fees included, last 24 hours, across midnight) that start the cooldown. A gain resets the streak. A buy is never a loss.",
     step: "1",
     min: "1"
   }

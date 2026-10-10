@@ -56,7 +56,7 @@ export default async function ControlsPage({ searchParams }: { searchParams: Pro
       <section className="panel" aria-labelledby="limits-heading">
         <h2 id="limits-heading">Your limits</h2>
         <p className="panel-copy">
-          Every order is checked against these first. When one stops an order, Kairis tells you which limit and why.
+          Every order is checked against these first. When one stops an order, Kairis tells you which limit and why. Limits stop new buys only: exits (a sell that reduces a position you hold) are always allowed. Only the kill switch stops everything.
           &quot;Today&quot; means the current UTC day (00:00 to 24:00 UTC) everywhere in Kairis.
         </p>
         <LimitsForm limits={limits} />

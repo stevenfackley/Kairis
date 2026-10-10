@@ -64,10 +64,14 @@ export function evaluateRisk(ctx: RiskContext, intent: OrderIntent): RiskDecisio
     add("position-available", ok, heldNotional > 0 ? (ok ? `Selling ${usd(intent.quoteUsd)} of a ${usd(heldNotional)} position.` : `Sell ${usd(intent.quoteUsd)} exceeds the ${usd(heldNotional)} held.`) : `There is no position in ${intent.productId} to sell.`, "block");
   }
 
-  const tradesOk = ctx.today.tradesCount < ctx.limits.maxTradesPerDay;
-  add("trades-per-day", tradesOk, tradesOk ? `${ctx.today.tradesCount} of ${ctx.limits.maxTradesPerDay} trades used today (UTC).` : `Daily trade limit of ${ctx.limits.maxTradesPerDay} reached for today (UTC).`, "block");
-  const lossOk = cents(ctx.today.realizedPnlUsd) > -cents(ctx.limits.dailyLossCapUsd);
-  add("daily-loss-cap", lossOk, lossOk ? `Realized P&L today (UTC) ${usd(ctx.today.realizedPnlUsd)} against a ${usd(ctx.limits.dailyLossCapUsd)} loss cap.` : `Daily loss cap of ${usd(ctx.limits.dailyLossCapUsd)} reached (realized ${usd(ctx.today.realizedPnlUsd)} today, UTC).`, "block");
+  // A sell that only reduces the position is an exit: limits stop new buys, never exits.
+  const exit = intent.side === "SELL" && valid && heldNotional > 0 && withinCents(intent.quoteUsd, heldNotional * 1.0001);
+  const exitDetail = "Exits are always allowed: this sell reduces your position.";
+
+  const tradesOk = exit || ctx.today.tradesCount < ctx.limits.maxTradesPerDay;
+  add("trades-per-day", tradesOk, tradesOk ? (exit ? exitDetail : `${ctx.today.tradesCount} of ${ctx.limits.maxTradesPerDay} trades used today (UTC).`) : `Daily trade limit of ${ctx.limits.maxTradesPerDay} reached for today (UTC).`, "block");
+  const lossOk = exit || cents(ctx.today.realizedPnlUsd) > -cents(ctx.limits.dailyLossCapUsd);
+  add("daily-loss-cap", lossOk, lossOk ? (exit ? exitDetail : `Realized P&L today (UTC) ${usd(ctx.today.realizedPnlUsd)} against a ${usd(ctx.limits.dailyLossCapUsd)} loss cap.`) : `Daily loss cap of ${usd(ctx.limits.dailyLossCapUsd)} reached (realized ${usd(ctx.today.realizedPnlUsd)} today, UTC).`, "block");
 
   let cooldownEnds: number | null = null;
   if (ctx.today.consecutiveLosses >= ctx.limits.lossStreakTrigger && ctx.today.lastLossAt) {
@@ -76,8 +80,10 @@ export function evaluateRisk(ctx: RiskContext, intent: OrderIntent): RiskDecisio
   }
   add(
     "cooldown",
-    cooldownEnds === null,
-    cooldownEnds === null
+    exit || cooldownEnds === null,
+    exit
+      ? exitDetail
+      : cooldownEnds === null
       ? "No active cooldown."
       : `In cooldown after ${ctx.today.consecutiveLosses} consecutive losses; new orders wait until ${hhmmUtc(cooldownEnds)} UTC (${ctx.limits.cooldownMinutes} min after the last loss).`,
     "block"

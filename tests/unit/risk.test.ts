@@ -111,4 +111,38 @@ describe("evaluateRisk", () => {
   it("never reports a negative data age", () => {
     expect(evaluateRisk(ctx({ dataAgeMs: -4000 }), buy(100)).checks.find((c) => c.code === "fresh-data")?.detail).toBe("Market data is 0 s old.");
   });
+
+  describe("risk-reducing sells", () => {
+    const pos = { "BTC-USD": { baseSize: 5, avgCost: 100, notionalUsd: 500 } };
+    const sell = (quoteUsd: number): OrderIntent => ({ productId: "BTC-USD", side: "SELL", quoteUsd, mode: "paper" });
+    const atCap = { tradesCount: 1, realizedPnlUsd: -300, consecutiveLosses: 0, lastLossAt: null };
+    const inCooldown = { tradesCount: 2, realizedPnlUsd: -50, consecutiveLosses: 2, lastLossAt: "2026-10-09T11:50:00Z" };
+    const atTradeLimit = { tradesCount: 6, realizedPnlUsd: 0, consecutiveLosses: 0, lastLossAt: null };
+    it("lets a sell through at the daily loss cap, in cooldown and after the trade limit", () => {
+      for (const today of [atCap, inCooldown, atTradeLimit]) {
+        const d = evaluateRisk(ctx({ positions: pos, today }), sell(200));
+        expect(d.outcome).toBe("approved");
+        expect(d.checks.filter((c) => ["trades-per-day", "daily-loss-cap", "cooldown"].includes(c.code)).every((c) => c.passed)).toBe(true);
+      }
+      const d = evaluateRisk(ctx({ positions: pos, today: atCap }), sell(200));
+      expect(d.checks.find((c) => c.code === "daily-loss-cap")?.detail).toBe("Exits are always allowed: this sell reduces your position.");
+    });
+    it("still halts a sell while paused", () => {
+      expect(evaluateRisk(ctx({ positions: pos, today: atCap, limits: { ...limits, tradingPaused: true } }), sell(200)).outcome).toBe("halted");
+    });
+    it("still blocks a buy at each limit", () => {
+      for (const today of [atCap, inCooldown, atTradeLimit]) {
+        expect(evaluateRisk(ctx({ positions: pos, today }), buy(100)).outcome).toBe("blocked");
+      }
+    });
+    it("still blocks an oversell at a limit", () => {
+      expect(evaluateRisk(ctx({ positions: pos, today: atCap }), sell(600)).outcome).toBe("blocked");
+      expect(evaluateRisk(ctx({ today: atCap }), sell(10)).outcome).toBe("blocked");
+    });
+  });
+  it("keeps the cooldown across midnight until it ends", () => {
+    const streak = { tradesCount: 0, realizedPnlUsd: 0, consecutiveLosses: 2, lastLossAt: "2026-10-08T23:50:00Z" };
+    expect(evaluateRisk(ctx({ today: streak, now: new Date("2026-10-09T00:05:00Z") }), buy(100)).reasons.join(" ")).toMatch(/cooldown/i);
+    expect(evaluateRisk(ctx({ today: streak, now: new Date("2026-10-09T00:15:00Z") }), buy(100)).outcome).toBe("approved");
+  });
 });
