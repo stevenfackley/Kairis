@@ -87,6 +87,20 @@ describe("public fetchers", () => {
     await expect(fetchCandles("ETH-USD", "ONE_DAY", 5, stub(500, "boom"))).rejects.toThrow("(500)");
   });
 
+  it("passes an abort signal and works with stubs that ignore it", async () => {
+    const f = stub(200, { trades: [{ price: "5", time: "2026-10-09T12:00:00Z" }] });
+    await fetchTicker("ETH-USD", f);
+    expect(call(f).init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("maps a timeout abort to a clear error", async () => {
+    const timeout = vi.fn(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+    await expect(fetchTicker("ETH-USD", timeout)).rejects.toThrow("Coinbase public request timed out after 8 s");
+    await expect(fetchCandles("ETH-USD", "ONE_DAY", 5, timeout)).rejects.toThrow("Coinbase public request timed out after 8 s");
+  });
+
   it("throws on malformed JSON body", async () => {
     await expect(fetchTicker("ETH-USD", stub(200, "not json"))).rejects.toThrow();
     await expect(fetchCandles("ETH-USD", "ONE_DAY", 5, stub(200, { nope: 1 }))).rejects.toThrow();

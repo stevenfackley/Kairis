@@ -66,13 +66,27 @@ export function mapTicker(productId: string, json: unknown): Ticker {
   };
 }
 
+const TIMEOUT_MS = 8000;
+const TIMEOUT_MESSAGE = "Coinbase public request timed out after 8 s";
+
+function isTimeout(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
 async function getJson(fetchImpl: FetchLike, url: string): Promise<unknown> {
-  const response = await fetchImpl(url, { method: "GET", cache: "no-store" });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Coinbase public request failed (${response.status}): ${body}`);
+  try {
+    const response = await fetchImpl(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Coinbase public request failed (${response.status}): ${body}`);
+    }
+    return (await response.json()) as unknown;
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new Error(TIMEOUT_MESSAGE);
+    }
+    throw error;
   }
-  return (await response.json()) as unknown;
 }
 
 export async function fetchCandles(
