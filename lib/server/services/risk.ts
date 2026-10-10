@@ -36,15 +36,18 @@ function liveExposure(order: AssistedOrder): boolean {
 
 // Live P&L is rebuilt from the orders Kairis itself recorded, in time order. Trades made outside Kairis
 // (the Coinbase app, other bots) are invisible here, so live limits apply to Kairis trades only.
-// Fees are left out of realized P&L: charging them to buys would count every entry as a loss.
+// Exchange-reported fees are charged the same way as paper fees: a buy's fee goes into the cost basis
+// (so a buy never realizes a loss) and a sell's fee comes out of its proceeds. An in-flight order has
+// no reported fee yet and counts as fee-free until reconcile records one.
 function liveFills(exposure: AssistedOrder[], prices: Record<string, number>): Fill[] {
   const fills: Fill[] = [];
   const lots: Record<string, Lot> = {};
   for (const order of sortByTime(exposure)) {
     const price = order.averagePrice ?? prices[order.productId] ?? 0;
     const baseSize = order.filledSize ?? (price > 0 ? order.quoteUsd / price : 0);
-    const realizedPnlUsd = order.side === "SELL" && price > 0 && baseSize > 0 ? realizeSell(lots[order.productId], baseSize, price, 0) : 0;
-    const fill: Fill = { productId: order.productId, side: order.side, baseSize, price, realizedPnlUsd, createdAt: order.createdAt, status: "filled" };
+    const feeUsd = order.totalFees ?? 0;
+    const realizedPnlUsd = order.side === "SELL" && price > 0 && baseSize > 0 ? realizeSell(lots[order.productId], baseSize, price, feeUsd) : 0;
+    const fill: Fill = { productId: order.productId, side: order.side, baseSize, price, feeUsd, realizedPnlUsd, createdAt: order.createdAt, status: "filled" };
     applyFill(lots, fill);
     fills.push(fill);
   }
