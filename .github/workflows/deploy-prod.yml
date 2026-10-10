@@ -1,0 +1,119 @@
+name: deploy-prod
+
+on:
+  push:
+    tags: ["[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*_Release"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or SHA to deploy
+        required: true
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+
+jobs:
+  build:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ inputs.ref || github.ref }}" }
+      - uses: aws-actions/configure-aws-credentials@v6
+        with: { role-to-assume: "${{ secrets.AWS_OIDC_ROLE_ARN }}", aws-region: "${{ env.AWS_REGION }}" }
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.ECR_REGISTRY }}/kairis-web:prod-${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/kairis-web:latest
+          cache-from: type=gha,scope=kairis-web
+          cache-to: type=gha,mode=max,scope=kairis-web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ inputs.ref || github.ref }}" }
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.QAVREN_DB_PROD_SESSION_URL }}
+        run: |
+          npm ci --omit=dev --ignore-scripts
+          node scripts/db-migrate.mjs
+      - uses: aws-actions/configure-aws-credentials@v6
+        with: { role-to-assume: "${{ secrets.AWS_OIDC_ROLE_ARN }}", aws-region: "${{ env.AWS_REGION }}" }
+      - name: Deploy over SSM
+        env:
+          IMAGE_TAG: prod-${{ github.sha }}
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
+          # Appended after DOTENV_CONTENT rather than folded into it. That blob is write-only, so
+          # adding one key would mean retyping every other one from memory and losing whatever was
+          # not remembered. These stand alone and an empty one simply leaves the setting unset.
+          EXTRA_ENV_CONTENT: ${{ secrets.EXTRA_ENV_CONTENT }}
+        run: |
+          set -euo pipefail
+          INSTANCE_ID=$(aws ssm describe-instance-information --filters "Key=tag:app-kairis,Values=true" \
+            --query "InstanceInformationList[?PingStatus=='Online'].InstanceId | [0]" --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then echo "no online kairis instance"; exit 1; fi
+          echo "instance: $INSTANCE_ID"
+          COMPOSE_B64=$(base64 -w0 compose.prod.yaml)
+          ENV_B64=$(printf '%s\n%s\nECR_REGISTRY=%s\nIMAGE_TAG=%s\n' "$DOTENV_CONTENT" "${EXTRA_ENV_CONTENT:-}" "$ECR_REGISTRY" "$IMAGE_TAG" | base64 -w0)
+          python3 - "$COMPOSE_B64" "$ENV_B64" "$AWS_REGION" "$ECR_REGISTRY" > /tmp/cmd.json <<'PY'
+          import json, sys
+          compose_b64, env_b64, region, registry = sys.argv[1:5]
+          cmds = [
+            "set -e",
+            "mkdir -p /opt/kairis && cd /opt/kairis",
+            f"echo {compose_b64} | base64 -d > compose.prod.yaml",
+            f"umask 077 && echo {env_b64} | base64 -d > .env",
+            f"TOKEN=$(aws ssm get-parameter --name /kairis/prod/tunnel_token --with-decryption --query Parameter.Value --output text --region {region})",
+            "umask 077 && echo \"TUNNEL_TOKEN=$TOKEN\" >> .env",
+            f"aws ecr get-login-password --region {region} | docker login --username AWS --password-stdin {registry}",
+            "docker compose -f compose.prod.yaml pull",
+            "docker compose -f compose.prod.yaml up -d --remove-orphans",
+            "docker image prune -f",
+            "for i in $(seq 1 40); do W=$(curl -fsS http://127.0.0.1:3040/api/health >/dev/null 2>&1 && echo ok || echo no); H=$(docker inspect --format '{{.State.Health.Status}}' kairis-web 2>/dev/null || echo missing); echo web=$W health=$H; if [ \"$W\" = ok ] && [ \"$H\" = healthy ]; then exit 0; fi; sleep 3; done",
+            "docker compose -f compose.prod.yaml logs --tail 100; exit 1",
+          ]
+          json.dump({"commands": cmds}, sys.stdout)
+          PY
+          CMD_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
+            --parameters file:///tmp/cmd.json --timeout-seconds 900 --query Command.CommandId --output text)
+          echo "command: $CMD_ID"
+          DEADLINE=$(( $(date +%s) + 900 ))
+          S=Pending
+          while :; do
+            S=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$S" in Success|Failed|Cancelled|TimedOut) break;; esac
+            if [ "$(date +%s)" -gt "$DEADLINE" ]; then S=TimedOut; break; fi
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text || true
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text || true
+          echo "status: $S"
+          [ "$S" = Success ]
+      - name: Smoke the public URL
+        run: |
+          for i in $(seq 1 20); do curl -fsS https://kairis.qavrensolutions.com/api/health && exit 0; sleep 6; done
+          exit 1
