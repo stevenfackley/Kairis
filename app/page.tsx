@@ -18,10 +18,9 @@ const phases = [
 
 const stack = [
   "Next.js App Router",
-  "Supabase Postgres",
+  "Postgres",
   "Cloudflare R2",
   "GitHub Actions",
-  "Proxmox test environments",
   "AWS EC2 production"
 ];
 
@@ -43,24 +42,7 @@ export default function HomePage() {
       </section>
 
       <section className="cta-strip">
-        <Link className="cta-primary" href="/onboarding">
-          Start onboarding flow
-        </Link>
-        <Link className="cta-secondary" href="/paper">
-          Open paper workspace
-        </Link>
-        <Link className="cta-secondary" href="/connect-exchange">
-          Review exchange setup
-        </Link>
-        <Link className="cta-secondary" href="/reports">
-          Open reports
-        </Link>
-        <Link className="cta-secondary" href="/assisted-live">
-          Assisted live trading
-        </Link>
-        <Link className="cta-secondary" href="/operations">
-          Operations
-        </Link>
+        <Link className="cta-primary" href="/sign-in">Sign in</Link>
       </section>
 
       <section className="grid">

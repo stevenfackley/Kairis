@@ -7,8 +7,6 @@ export function GET() {
   return NextResponse.json({
     app: status.app,
     status: "ok",
-    appEnv: status.appEnv,
-    exchangeProvider: status.exchangeProvider,
-    storage: status.storage
+    appEnv: status.appEnv
   });
 }
