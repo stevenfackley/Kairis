@@ -1,0 +1,54 @@
+/* Paper page only. Prefixed so it cannot collide once loaded globally by the router. */
+
+.paper-page {
+  display: grid;
+  gap: 20px;
+}
+
+.paper-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.paper-eyebrow .eyebrow {
+  margin: 0;
+}
+
+.paper-ticket {
+  display: grid;
+  gap: 16px;
+}
+
+.paper-ticket-note,
+.paper-ticket-submit {
+  grid-column: 1 / -1;
+}
+
+.paper-ticket-note textarea {
+  min-height: 72px;
+}
+
+.paper-ticket-result {
+  display: grid;
+  gap: 12px;
+}
+
+.paper-note {
+  min-width: 16ch;
+  max-width: 40ch;
+  color: var(--muted);
+}
+
+.paper-reason {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+}
+
+.paper-reason::before {
+  content: "Reason: ";
+  color: var(--danger);
+}
