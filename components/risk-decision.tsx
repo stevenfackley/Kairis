@@ -1,3 +1,4 @@
+import { when } from "@/lib/format";
 import type { RiskDecision } from "@/lib/types";
 
 const outcomeCopy: Record<RiskDecision["outcome"], { label: string; pill: string; lede: string }> = {
@@ -34,7 +35,7 @@ export function RiskDecisionView({ decision, title = "Risk checks" }: { decision
           </li>
         ))}
       </ul>
-      <p className="panel-copy risk-evaluated">Evaluated {new Date(decision.evaluatedAt).toLocaleString("en-US", { timeZone: "UTC" })} UTC</p>
+      <p className="panel-copy risk-evaluated">Evaluated {when(decision.evaluatedAt)}</p>
     </section>
   );
 }
