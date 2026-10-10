@@ -32,7 +32,9 @@ export default async function ExchangePage() {
       <section className="panel" aria-labelledby="policy-heading">
         <h2 id="policy-heading">Key policy</h2>
         <ul>
-          <li>Use a Coinbase Advanced Trade API key, created on the Coinbase Developer Platform.</li>
+          <li>
+            Use a Coinbase Developer Platform secret API key. Either signature algorithm works: Ed25519 (the default) or ECDSA.
+          </li>
           <li>Create it with View and Trade permissions only. Never grant Transfer.</li>
           <li>Kairis validates the key with Coinbase and refuses any key that can transfer funds.</li>
           <li>The private key is encrypted at rest and never shown again.</li>

@@ -1,4 +1,5 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
+import { normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
 import type {
   Balance,
   ExchangeClient,
@@ -152,10 +153,15 @@ export function createCoinbaseClient(
   creds: { keyId: string; secret: string },
   fetchImpl: FetchLike = fetch
 ): ExchangeClient {
+  // Normalized on first use: a SEC1 PEM or escaped newlines would otherwise fail inside generateJwt.
+  let normalized: CoinbaseCredentials | null = null;
+  const credentials = () => (normalized ??= normalizeCoinbaseCredentials(creds.keyId, creds.secret));
+
   async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+    const { keyId, secret } = credentials();
     const token = await generateJwt({
-      apiKeyId: creds.keyId,
-      apiKeySecret: creds.secret,
+      apiKeyId: keyId,
+      apiKeySecret: secret,
       requestMethod: method,
       requestHost: apiHost,
       requestPath: path.split("?")[0]

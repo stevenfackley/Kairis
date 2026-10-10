@@ -1,6 +1,9 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@coinbase/cdp-sdk/auth", () => ({ generateJwt: vi.fn(async () => "token") }));
+
+import { generateJwt } from "@coinbase/cdp-sdk/auth";
 
 import {
   createCoinbaseClient,
@@ -187,7 +190,28 @@ describe("authed mappers", () => {
 });
 
 describe("createCoinbaseClient", () => {
-  const creds = { keyId: "kid", secret: "sec" };
+  const ec = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
+  // The SEC1 PEM exactly as Coinbase's ECDSA key download holds it.
+  const creds = { keyId: "organizations/org-1/apiKeys/key-1", secret: ec.export({ type: "sec1", format: "pem" }).toString() };
+
+  it("signs with the normalized PKCS#8 key and a uri claim without the query string", async () => {
+    vi.mocked(generateJwt).mockClear();
+    const f = stub(200, { accounts: [] });
+    await createCoinbaseClient(creds, f).balances();
+    expect(generateJwt).toHaveBeenCalledWith({
+      apiKeyId: "organizations/org-1/apiKeys/key-1",
+      apiKeySecret: ec.export({ type: "pkcs8", format: "pem" }).toString(),
+      requestMethod: "GET",
+      requestHost: "api.coinbase.com",
+      requestPath: "/api/v3/brokerage/accounts"
+    });
+  });
+
+  it("refuses a malformed stored key without calling Coinbase", async () => {
+    const f = stub(200, {});
+    await expect(createCoinbaseClient({ keyId: "kid", secret: "sec" }, f).keyPermissions()).rejects.toThrow("not in a format Coinbase issues");
+    expect(f).not.toHaveBeenCalled();
+  });
 
   it("keyPermissions GETs with bearer", async () => {
     const f = stub(200, { can_view: true, can_trade: true, can_transfer: false });

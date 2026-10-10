@@ -12,13 +12,10 @@ function field(formData: FormData, name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-// connectCoinbase reports a failed validation as "<recommendation> (<code>)"; say what happened first.
-const VALIDATION_CODE = /\((auth_error|rate_limited|provider_unavailable|provider_error)\)$/;
-
-// Never let the pasted secret travel back to the browser inside an error message.
+// connectCoinbase already words its errors for people. Belt and braces: never let the pasted secret
+// travel back to the browser inside one.
 function connectError(error: unknown, secret: string): string {
-  const raw = errorMessage(error, "Coinbase did not accept this key.");
-  const message = VALIDATION_CODE.test(raw) ? `Kairis could not validate this key with Coinbase. ${raw}` : raw;
+  const message = errorMessage(error, "Coinbase did not accept this key.");
   return secret ? message.split(secret).join("[redacted]") : message;
 }
 
@@ -27,7 +24,7 @@ export async function connectExchangeAction(_prev: ExchangeFormState, formData: 
   const keyId = field(formData, "keyId");
   const secretPem = field(formData, "secretPem");
   if (!keyId || !secretPem) {
-    return { error: "Both the API key name and the private key are required.", connected: false };
+    return { error: "Both the API key id and the private key are required.", connected: false };
   }
   try {
     await connectCoinbase(user.id, keyId, secretPem);
