@@ -23,8 +23,10 @@ This repository is proprietary and is not open source. See [LICENSE](LICENSE) fo
 - **Risk engine**: global pause (kill switch), fresh data, provider health, valid size, max position
   after the fill, per-symbol caps, a sell needs a position, trades per day, daily loss cap, and a
   cooldown after a loss streak. Outcomes are `approved`, `blocked` or `halted`, each with reasons.
-- **Paper trading**: simulated fills at the Coinbase reference price, positions, realized P&L, and a
-  journal that keeps blocked attempts with their reasons.
+- **Paper trading**: simulated fills at the Coinbase reference price, sized and charged like a live
+  market order (Coinbase's product rules, a buy's dollars include the 0.6% taker fee, a sell's fee
+  comes off the proceeds), positions, realized P&L, and a journal that keeps blocked attempts with
+  their reasons.
 - **Coinbase connection**: per-user Coinbase Developer Platform keys. Kairis reads the key's
   permissions, rejects any key that can transfer funds, and stores the private key sealed with
   AES-256-GCM under `KAIRIS_SECRET_KEY`.

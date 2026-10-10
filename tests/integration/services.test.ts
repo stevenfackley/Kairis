@@ -17,7 +17,7 @@ const { scratchDir } = vi.hoisted(() => {
   return { scratchDir: dir };
 });
 
-import { __setProductLoader } from "@/lib/exchange/coinbase-public";
+import { __setProductLoader, mapProduct } from "@/lib/exchange/coinbase-public";
 import type { ProductRules } from "@/lib/exchange/types";
 import { closePool, query } from "@/lib/server/db";
 import { getAssistedOrder } from "@/lib/server/repos/assisted";
@@ -152,6 +152,40 @@ describe.skipIf(!enabled)("services", () => {
     const context = await buildRiskContext(USER, "paper", "SOL-USD");
     expect(context.positions["SOL-USD"]).toBeUndefined();
     expect(context.today).toMatchObject({ tradesCount: 2, consecutiveLosses: 1 });
+  });
+
+  it("sizes paper orders with the product's Coinbase rules and closes a position without leaving dust", async () => {
+    const shib = mapProduct(JSON.parse(await readFile(path.resolve(repoRoot, "tests/fixtures/coinbase/product-shib-usd.json"), "utf8")));
+    const shibPrice = 0.00000546;
+    __setProductLoader(async (productId) => (productId === "SHIB-USD" ? shib : rules(productId)));
+    __setMarketFetchers({
+      candles: async () => candles(),
+      ticker: async (productId) => (productId === "SHIB-USD" ? { ...ticker(productId), price: shibPrice, bestBid: shibPrice, bestAsk: shibPrice } : ticker(productId))
+    });
+    try {
+      const small = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 0.5 });
+      expect(small.decision).toMatchObject({ outcome: "blocked", reasons: ["The smallest BTC-USD buy Coinbase accepts is $1.00."] });
+      expect(small.trade).toMatchObject({ status: "blocked", baseSize: 0, feeUsd: null });
+
+      // 100 / 1.006 / 0.00000546 = 18,205,783.21 SHIB: a fractional fill, as on Coinbase for a quote-sized buy.
+      const bought = await placePaperOrder(USER, { productId: "SHIB-USD", side: "BUY", quoteUsd: 100 });
+      expect(bought.trade).toMatchObject({ status: "filled", quoteUsd: 100, feeUsd: 0.59642147 });
+      expect(bought.trade.baseSize % 1).not.toBe(0);
+
+      // base_increment 1: $50 is 9,157,509.16 SHIB, sold as 9,157,509.
+      const part = await placePaperOrder(USER, { productId: "SHIB-USD", side: "SELL", quoteUsd: 50 });
+      expect(part.trade).toMatchObject({ status: "filled", baseSize: 9157509 });
+
+      // The rest floors to whole SHIB with a fraction left over; the dust rule sells it all.
+      const rest = await placePaperOrder(USER, { productId: "SHIB-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+      expect(rest.decision.outcome).toBe("approved");
+      expect(rest.trade.baseSize).toBeCloseTo(bought.trade.baseSize - 9157509, 8);
+      const context = await buildRiskContext(USER, "paper", "SHIB-USD");
+      expect(context.positions["SHIB-USD"]).toBeUndefined();
+    } finally {
+      __setProductLoader(async (productId) => rules(productId));
+      __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    }
   });
 
   it("previews and submits through the mock provider, then reconcile marks the order filled", async () => {

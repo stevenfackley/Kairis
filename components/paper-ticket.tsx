@@ -121,6 +121,7 @@ export function PaperTicket({ defaults, watchlist, holdings }: PaperTicketProps)
           />
           <span className="field-help">
             A sell is sized in dollars too, up to what you hold. To close a position exactly, use Sell entire position.
+            Coinbase&apos;s minimums and increments for the product apply, as they do live.
           </span>
         </label>
 

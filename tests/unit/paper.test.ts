@@ -31,6 +31,15 @@ describe("buildPositions", () => {
     const reopened = buildPositions([...fills, t({ baseSize: 1, price: 50, createdAt: "2026-10-09T10:02:00Z" })], {});
     expect(reopened["BTC-USD"]).toEqual({ baseSize: 1, avgCost: 50, notionalUsd: 50 });
   });
+  it("leaves no phantom position from float noise on large sizes", () => {
+    // In floats, 18205783.61333829 - 9157509 - 9048274.61333829 is 1.86e-9, above the dust threshold.
+    const p = buildPositions([
+      t({ productId: "SHIB-USD", baseSize: 18205783.61333829, price: 0.00000546 }),
+      t({ productId: "SHIB-USD", side: "SELL", baseSize: 9157509, price: 0.00000546, createdAt: "2026-10-09T10:01:00Z" }),
+      t({ productId: "SHIB-USD", side: "SELL", baseSize: 9048274.61333829, price: 0.00000546, createdAt: "2026-10-09T10:02:00Z" })
+    ], {});
+    expect(p).toEqual({});
+  });
   it("keeps each product separate across interleaved fills, including products outside the watchlist", () => {
     const p = buildPositions([
       t({ productId: "AVAX-USD", baseSize: 2, price: 30, createdAt: "2026-10-01T00:00:00Z" }),
@@ -123,6 +132,34 @@ describe("fillPaperOrder", () => {
       const f = fillPaperOrder(held, { productId: "BTC-USD", side: "SELL", quoteUsd, mode: "paper" }, 100, PAPER_TAKER_FEE_RATE, { closePosition: true });
       expect(f.baseSize).toBe(0.12345678);
     }
+  });
+  it("fills the Coinbase-sized order: the floored quote on a buy, the floored coins on a sell", () => {
+    const buy = fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100.759, mode: "paper" }, 100, PAPER_TAKER_FEE_RATE, {
+      size: { kind: "quote", quoteSize: "100.75" }
+    });
+    expect(buy.baseSize * buy.price + buy.feeUsd).toBeCloseTo(100.75, 6);
+    const held = { "SHIB-USD": { baseSize: 20000000, avgCost: 0.000005, notionalUsd: 0 } };
+    const sell = fillPaperOrder(held, { productId: "SHIB-USD", side: "SELL", quoteUsd: 50, mode: "paper" }, 0.00000546, PAPER_TAKER_FEE_RATE, {
+      size: { kind: "base", baseSize: "9157509" },
+      baseIncrement: "1"
+    });
+    expect(sell.baseSize).toBe(9157509);
+  });
+  describe("dust rule: a sell never leaves less than one base_increment behind", () => {
+    const sellOf = (heldSize: number, baseSize: string, baseIncrement: string) =>
+      fillPaperOrder({ "SHIB-USD": { baseSize: heldSize, avgCost: 1, notionalUsd: 0 } }, { productId: "SHIB-USD", side: "SELL", quoteUsd: 1, mode: "paper" }, 1, PAPER_TAKER_FEE_RATE, {
+        size: { kind: "base", baseSize },
+        baseIncrement
+      }).baseSize;
+    it("sells the full held amount when the floored size would strand a sub-increment remainder", () => {
+      expect(sellOf(18206777.07, "18206777", "1")).toBe(18206777.07);
+      expect(sellOf(0.12345678, "0.12345", "0.00001")).toBe(0.12345678);
+    });
+    it("keeps a remainder of one increment or more", () => {
+      expect(sellOf(18206778, "18206777", "1")).toBe(18206777);
+      expect(sellOf(0.00000002, "0.00000001", "0.00000001")).toBe(0.00000001);
+      expect(sellOf(0.3, "0.1", "0.00000001")).toBe(0.1);
+    });
   });
   it("realizes nothing on a sell without a position", () => {
     expect(fillPaperOrder({}, { productId: "BTC-USD", side: "SELL", quoteUsd: 10, mode: "paper" }, 100)).toEqual({ baseSize: 0, price: 100, feeUsd: 0, realizedPnlUsd: 0 });

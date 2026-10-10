@@ -2,7 +2,7 @@ import { env } from "@/lib/env";
 import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { createMockClient } from "@/lib/exchange/mock";
-import { describeSize, sizeMarketOrder, type ProductRules } from "@/lib/exchange/sizing";
+import { describeSize, sizeMarketOrder } from "@/lib/exchange/sizing";
 import type { ExchangeClient, OrderPreview, OrderStatus, OrderSubmitResult } from "@/lib/exchange/types";
 import { num, usd } from "@/lib/format";
 import {
@@ -19,7 +19,7 @@ import { appendAudit } from "@/lib/server/repos/audit";
 import { getConnectionStatus, getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getReferencePrice } from "@/lib/server/services/market";
 import { buildRiskContext, checkOrder } from "@/lib/server/services/risk";
-import { errorMessage, storableUsd } from "@/lib/server/services/shared";
+import { errorMessage, loadProductRules, storableUsd, withFailedCheck } from "@/lib/server/services/shared";
 import type { AssistedOrder, OrderIntent, RiskDecision } from "@/lib/types";
 
 export const PREVIEW_TTL_MS = 120_000;
@@ -55,14 +55,6 @@ async function record(userId: string, order: AssistedOrder, action: string): Pro
   return order;
 }
 
-function withFailedCheck(decision: RiskDecision, code: string, detail: string): RiskDecision {
-  return {
-    outcome: "blocked",
-    checks: [...decision.checks, { code, passed: false, detail }],
-    reasons: [...decision.reasons, detail],
-    evaluatedAt: decision.evaluatedAt
-  };
-}
 
 /** The coins Coinbase reports available, 0 when the account holds none, null when unknown. */
 async function availableBase(client: ExchangeClient, currency: string): Promise<number | null> {
@@ -155,14 +147,12 @@ export async function previewAssisted(
 
   // Coinbase's own rules for this product (state, increments, minimums) size the order once, here.
   // Submit sends exactly this size, so the preview and the order can never disagree.
-  let rules: ProductRules;
-  try {
-    rules = await getProductRules(live.productId);
-  } catch (error) {
-    const message = `Kairis could not load the ${live.productId} trading rules from Coinbase: ${normalizeExchangeError(error).message}`;
-    await appendAudit(userId, "assisted-order", "preview-failed", `${label(live)}: ${message}`);
-    throw new Error(message);
+  const lookup = await loadProductRules(live.productId);
+  if (!lookup.ok) {
+    await appendAudit(userId, "assisted-order", "preview-failed", `${label(live)}: ${lookup.message}`);
+    throw new Error(lookup.message);
   }
+  const { rules } = lookup;
   const available = client.provider === "coinbase" && live.side === "SELL" ? await availableBase(client, rules.baseCurrency) : null;
   const sizing = sizeMarketOrder({ side: live.side, quoteUsd: live.quoteUsd, price: context.referencePrice, rules, availableBase: available, baseSize: closeBase });
   if (!sizing.ok) {

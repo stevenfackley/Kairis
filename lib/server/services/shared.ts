@@ -1,3 +1,8 @@
+import { getProductRules } from "@/lib/exchange/coinbase-public";
+import { normalizeExchangeError } from "@/lib/exchange/errors";
+import type { ProductRules } from "@/lib/exchange/sizing";
+import type { RiskDecision } from "@/lib/types";
+
 // numeric(12,2) money columns: an absurd or non-finite size still has to persist on a blocked row.
 const MAX_STORABLE_USD = 9_999_999_999.99;
 // numeric(18,8) columns (sizes, prices, fees): at most 10 integer digits, 8 decimals.
@@ -61,6 +66,35 @@ export class UnknownProductError extends Error {
 // Checked by code, not instanceof, so it survives module mocks and duplicate module instances.
 export function isUnknownProductError(error: unknown): error is UnknownProductError {
   return typeof error === "object" && error !== null && "code" in error && error.code === UNKNOWN_PRODUCT;
+}
+
+/** An approved decision with one more failed check: blocked, or halted when the provider is the problem. */
+export function withFailedCheck(decision: RiskDecision, code: string, detail: string, outcome: "blocked" | "halted" = "blocked"): RiskDecision {
+  return {
+    outcome: decision.outcome === "halted" ? "halted" : outcome,
+    checks: [...decision.checks, { code, passed: false, detail }],
+    reasons: [...decision.reasons, detail],
+    evaluatedAt: decision.evaluatedAt
+  };
+}
+
+export type ProductRulesLookup = { ok: true; rules: ProductRules } | { ok: false; unknownProduct: boolean; message: string };
+
+/**
+ * Coinbase's current trading rules for a product (state, increments, minimums): the one source both paper
+ * and live orders are sized from. A "not found" means the product id is wrong; any other failure is an
+ * outage, and nothing may be sized or filled until the rules load again.
+ */
+export async function loadProductRules(productId: string): Promise<ProductRulesLookup> {
+  try {
+    return { ok: true, rules: await getProductRules(productId) };
+  } catch (error) {
+    const normalized = normalizeExchangeError(error);
+    if (normalized.status === 404 || normalized.status === 400) {
+      return { ok: false, unknownProduct: true, message: new UnknownProductError(productId).message };
+    }
+    return { ok: false, unknownProduct: false, message: `Kairis could not load the ${productId} trading rules from Coinbase: ${normalized.message}` };
+  }
 }
 
 const PUBLIC_FAILURE = /^Coinbase public request failed \((\d{3})\): ([\s\S]*)$/;

@@ -1,5 +1,6 @@
 import { DUST_BASE_SIZE, PAPER_TAKER_FEE_RATE } from "@/lib/domain/strategy";
-import type { DayStats, OrderIntent, Position, PositionMap } from "@/lib/types";
+import { compareDecimal, decimalString } from "@/lib/exchange/sizing";
+import type { DayStats, OrderIntent, OrderSize, Position, PositionMap } from "@/lib/types";
 
 /** `feeUsd` null or missing means no fee was recorded (fills from before fees were modeled). */
 export type Fill = {
@@ -28,16 +29,18 @@ export function isFlat(baseSize: number): boolean {
  * Applies one fill to the running average-cost lots. A buy adds its filled value plus its fee to the cost
  * basis (for a fee-inclusive buy that is the dollars spent); a sell reduces the size and leaves the
  * average cost alone; a dust remainder resets to flat so a later buy starts a fresh average.
+ * Sizes stay at the 8 decimals the database stores: float noise from adding and subtracting large sizes
+ * (18,000,000 SHIB carries about 4e-9 of it) must never survive as a phantom position.
  */
 export function applyFill(lots: Record<string, Lot>, f: Fill): void {
   const cur = lots[f.productId] ?? { baseSize: 0, avgCost: 0 };
   if (f.side === "BUY") {
-    const size = cur.baseSize + f.baseSize;
+    const size = round8(cur.baseSize + f.baseSize);
     const cost = cur.baseSize * cur.avgCost + f.baseSize * f.price + finiteOr0(f.feeUsd);
     lots[f.productId] = size > 0 ? { baseSize: size, avgCost: cost / size } : cur;
     return;
   }
-  const remaining = cur.baseSize - f.baseSize;
+  const remaining = round8(cur.baseSize - f.baseSize);
   lots[f.productId] = isFlat(remaining) || remaining < 0 ? { baseSize: 0, avgCost: 0 } : { baseSize: remaining, avgCost: cur.avgCost };
 }
 
@@ -66,32 +69,59 @@ export function realizeSell(held: Lot | undefined, size: number, price: number, 
   return realized * price - fee - realized * held.avgCost;
 }
 
+export type PaperFillOptions = {
+  /** Sell the whole held position. */
+  closePosition?: boolean;
+  /**
+   * The order as sized by sizeMarketOrder with Coinbase's product rules: the floored quote for a BUY, the
+   * floored coins for a SELL. Without it the intent's dollars are used as they are.
+   */
+  size?: OrderSize | null;
+  /** The product's base_increment (decimal string), for the dust rule on sells. */
+  baseIncrement?: string | null;
+};
+
+/**
+ * True when what a sell would leave behind is no real holding: floating-point dust, or (given the
+ * product's base_increment) less than one increment, which Coinbase would never accept as a sell size, so
+ * that remainder could never be sold. Paper sizes carry 8 decimals, so the remainder is compared at 8.
+ */
+function leavesDust(remainder: number, baseIncrement: string | null | undefined): boolean {
+  if (isFlat(remainder)) return true;
+  if (!baseIncrement || !(remainder > 0)) return false;
+  return compareDecimal(decimalString(round8(remainder)), baseIncrement) < 0;
+}
+
 /**
  * Simulated taker fill at the reference price, charged the way Coinbase charges a market order.
  * A BUY of Q dollars spends exactly Q, fee included (Coinbase's size_inclusive_of_fees quote_size): the
  * filled value is Q / (1 + feeRate), the fee is the rest, and the coins are the filled value / price, so
- * the cost basis is Q. A SELL of N coins pays `feeRate` of its gross N * price out of the proceeds. A sell
- * is capped at the held size, and closes the whole position when only dust would remain or when
- * `closePosition` asks for exactly that.
+ * the cost basis is Q. A SELL of N coins pays `feeRate` of its gross N * price out of the proceeds.
+ *
+ * A sell is capped at the held size. Dust rule: when the sell would leave less than one base_increment
+ * (or float dust) behind, or `closePosition` asks for it, the fill sells the full held amount instead, so
+ * a paper position is never left with a remainder too small to sell. The full amount differs from the
+ * floored size by less than one increment (1e-8 BTC, 1 SHIB), worth a fraction of a cent.
  */
 export function fillPaperOrder(
   positions: Record<string, Position | undefined>,
   intent: OrderIntent,
   referencePrice: number,
   feeRate: number = PAPER_TAKER_FEE_RATE,
-  opts: { closePosition?: boolean } = {}
+  opts: PaperFillOptions = {}
 ): { baseSize: number; price: number; feeUsd: number; realizedPnlUsd: number } {
   const price = round8(referencePrice);
   if (intent.side === "BUY") {
-    if (!(price > 0 && intent.quoteUsd > 0)) return { baseSize: 0, price, feeUsd: 0, realizedPnlUsd: 0 };
-    const filledValue = intent.quoteUsd / (1 + feeRate);
-    return { baseSize: round8(filledValue / price), price, feeUsd: round8(intent.quoteUsd - filledValue), realizedPnlUsd: 0 };
+    const quote = opts.size?.kind === "quote" ? Number(opts.size.quoteSize) : intent.quoteUsd;
+    if (!(price > 0 && quote > 0)) return { baseSize: 0, price, feeUsd: 0, realizedPnlUsd: 0 };
+    const filledValue = quote / (1 + feeRate);
+    return { baseSize: round8(filledValue / price), price, feeUsd: round8(quote - filledValue), realizedPnlUsd: 0 };
   }
-  const requested = price > 0 ? round8(intent.quoteUsd / price) : 0;
+  const requested = opts.size?.kind === "base" ? Number(opts.size.baseSize) : price > 0 ? round8(intent.quoteUsd / price) : 0;
   const held = positions[intent.productId];
   const heldSize = held && !isFlat(held.baseSize) ? held.baseSize : 0;
   let size = Math.min(requested, heldSize);
-  if (opts.closePosition || isFlat(heldSize - size)) size = heldSize;
+  if (opts.closePosition || leavesDust(heldSize - size, opts.baseIncrement)) size = heldSize;
   const feeUsd = round8(size * price * feeRate);
   return { baseSize: size, price, feeUsd, realizedPnlUsd: realizeSell(held, size, price, feeUsd) };
 }
