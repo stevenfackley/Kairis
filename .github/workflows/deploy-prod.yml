@@ -47,7 +47,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: production
+    # `Prod` is the environment that already holds the R2 token pair; the app's own secrets live
+    # beside it so nothing has to be retyped into one blob.
+    environment: Prod
     steps:
       - uses: actions/checkout@v7
         with: { ref: "${{ inputs.ref || github.ref }}" }
@@ -66,10 +68,19 @@ jobs:
       - name: Deploy over SSM
         env:
           IMAGE_TAG: prod-${{ github.sha }}
-          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
-          # Appended after DOTENV_CONTENT rather than folded into it. That blob is write-only, so
-          # adding one key would mean retyping every other one from memory and losing whatever was
-          # not remembered. These stand alone and an empty one simply leaves the setting unset.
+          # Non-secret configuration (app name, URLs, realm, feature flags, owner emails) kept as an
+          # environment variable so it can be read back and edited line by line.
+          DOTENV_CONTENT: ${{ vars.DOTENV_CONTENT }}
+          # Secrets stand alone, one GitHub secret each, so rotating one never means retyping the
+          # rest. An empty one simply leaves the setting unset on the host.
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          KAIRIS_SECRET_KEY: ${{ secrets.KAIRIS_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
           EXTRA_ENV_CONTENT: ${{ secrets.EXTRA_ENV_CONTENT }}
         run: |
           set -euo pipefail
@@ -78,7 +89,13 @@ jobs:
           if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then echo "no online kairis instance"; exit 1; fi
           echo "instance: $INSTANCE_ID"
           COMPOSE_B64=$(base64 -w0 compose.prod.yaml)
-          ENV_B64=$(printf '%s\n%s\nECR_REGISTRY=%s\nIMAGE_TAG=%s\n' "$DOTENV_CONTENT" "${EXTRA_ENV_CONTENT:-}" "$ECR_REGISTRY" "$IMAGE_TAG" | base64 -w0)
+          ENV_B64=$( {
+            printf '%s\n' "$DOTENV_CONTENT" "${EXTRA_ENV_CONTENT:-}"
+            for key in AUTH_SECRET KAIRIS_SECRET_KEY DATABASE_URL R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET R2_PUBLIC_URL; do
+              printf '%s=%s\n' "$key" "${!key:-}"
+            done
+            printf 'ECR_REGISTRY=%s\nIMAGE_TAG=%s\n' "$ECR_REGISTRY" "$IMAGE_TAG"
+          } | base64 -w0)
           python3 - "$COMPOSE_B64" "$ENV_B64" "$AWS_REGION" "$ECR_REGISTRY" > /tmp/cmd.json <<'PY'
           import json, sys
           compose_b64, env_b64, region, registry = sys.argv[1:5]
