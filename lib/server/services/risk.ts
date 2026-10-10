@@ -6,16 +6,20 @@ import { appendAudit } from "@/lib/server/repos/audit";
 import { getLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
 import { getMarketSnapshot, getReferencePrices, marketDataAgeMs, type MarketSnapshot } from "@/lib/server/services/market";
+import { isUnknownProductError } from "@/lib/server/services/shared";
 import type { AssistedOrder, OrderIntent, RiskContext, RiskDecision, TradeMode } from "@/lib/types";
 
 // Positions and day stats are rebuilt from the full history; the list repos default to small pages.
 export const HISTORY_LIMIT = 100_000;
 
-async function snapshotOrNull(productId: string): Promise<MarketSnapshot | null> {
+type SnapshotResult = { snapshot: MarketSnapshot | null; unknownProduct: boolean };
+
+// A failed fetch is an outage (halt) unless Coinbase said the product does not exist (block).
+async function snapshotFor(productId: string): Promise<SnapshotResult> {
   try {
-    return await getMarketSnapshot(productId);
-  } catch {
-    return null;
+    return { snapshot: await getMarketSnapshot(productId), unknownProduct: false };
+  } catch (error) {
+    return { snapshot: null, unknownProduct: isUnknownProductError(error) };
   }
 }
 
@@ -80,17 +84,20 @@ async function historyFills(userId: string, mode: TradeMode, productId: string):
 
 export async function buildRiskContext(userId: string, mode: TradeMode, productId: string): Promise<RiskContext> {
   const now = new Date();
-  const [limits, snapshot, history] = await Promise.all([getLimits(userId), snapshotOrNull(productId), historyFills(userId, mode, productId)]);
+  const [limits, market, history] = await Promise.all([getLimits(userId), snapshotFor(productId), historyFills(userId, mode, productId)]);
+  const { snapshot, unknownProduct } = market;
   return {
     limits,
     today: dayStats(history.fills, now),
     positions: buildPositions(history.fills, history.prices),
-    // No snapshot: price 0 and providerDegraded, which halts on its own. The age is unknown, not stale,
-    // so it stays 0 rather than inventing a number for the fresh-data check.
+    // No snapshot: price 0 and either providerDegraded (an outage, which halts) or unknownProduct (Coinbase
+    // does not list it, which blocks). The age is unknown, not stale, so it stays 0 rather than inventing
+    // a number for the fresh-data check.
     referencePrice: snapshot ? snapshot.ticker.price : 0,
     dataAgeMs: snapshot ? marketDataAgeMs(snapshot, now.getTime()) : 0,
     maxDataAgeMs: STRATEGY.maxTickerAgeMs,
-    providerDegraded: snapshot === null,
+    providerDegraded: snapshot === null && !unknownProduct,
+    unknownProduct,
     now
   };
 }

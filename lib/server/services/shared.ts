@@ -46,3 +46,32 @@ export function unstorableFillReason(
 export function errorMessage(error: unknown, fallback = "Unknown error."): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
+
+const UNKNOWN_PRODUCT = "UNKNOWN_PRODUCT";
+
+/** Coinbase answered "not found" for a product: the order is wrong, the provider is fine. */
+export class UnknownProductError extends Error {
+  readonly code = UNKNOWN_PRODUCT;
+  constructor(readonly productId: string) {
+    super(`${productId} is not a tradable Coinbase pair.`);
+    this.name = "UnknownProductError";
+  }
+}
+
+// Checked by code, not instanceof, so it survives module mocks and duplicate module instances.
+export function isUnknownProductError(error: unknown): error is UnknownProductError {
+  return typeof error === "object" && error !== null && "code" in error && error.code === UNKNOWN_PRODUCT;
+}
+
+const PUBLIC_FAILURE = /^Coinbase public request failed \((\d{3})\): ([\s\S]*)$/;
+
+/**
+ * True when a public market fetch failed because the product does not exist: a 404, or a 400 whose body
+ * is about the product id. Timeouts, 5xx and network errors are outages and return false.
+ */
+export function isProductNotFound(error: unknown): boolean {
+  const match = PUBLIC_FAILURE.exec(errorMessage(error, ""));
+  if (!match) return false;
+  const status = Number(match[1]);
+  return status === 404 || (status === 400 && /product/i.test(match[2] ?? ""));
+}

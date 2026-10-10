@@ -1,5 +1,6 @@
 import { STRATEGY } from "@/lib/domain/strategy";
 import { fetchCandles, fetchTicker } from "@/lib/exchange/coinbase-public";
+import { isProductNotFound, UnknownProductError } from "@/lib/server/services/shared";
 import type { Candle, Ticker } from "@/lib/types";
 
 export type MarketSnapshot = { candles: Candle[]; ticker: Ticker; fetchedAt: number };
@@ -24,11 +25,19 @@ export function __clearMarketCache(): void {
   inflight.clear();
 }
 
+// A "not found" from Coinbase means the product id is wrong, not that the feed is down: it surfaces
+// as UnknownProductError so the risk engine blocks the order instead of halting as degraded.
 async function load(productId: string): Promise<MarketSnapshot> {
-  const [candles, ticker] = await Promise.all([
-    fetchers.candles(productId, STRATEGY.granularity, STRATEGY.candleLimit),
-    fetchers.ticker(productId)
-  ]);
+  let candles: Candle[];
+  let ticker: Ticker;
+  try {
+    [candles, ticker] = await Promise.all([
+      fetchers.candles(productId, STRATEGY.granularity, STRATEGY.candleLimit),
+      fetchers.ticker(productId)
+    ]);
+  } catch (error) {
+    throw isProductNotFound(error) ? new UnknownProductError(productId) : error;
+  }
   const snapshot: MarketSnapshot = { candles, ticker, fetchedAt: Date.now() };
   cache.set(productId, snapshot);
   return snapshot;

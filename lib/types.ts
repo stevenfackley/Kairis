@@ -52,6 +52,8 @@ export type RiskContext = {
   dataAgeMs: number;
   maxDataAgeMs: number;
   providerDegraded: boolean;
+  /** Coinbase does not list the product (its market endpoints answered "not found"): blocked, not halted. */
+  unknownProduct?: boolean;
   now: Date;
 };
 

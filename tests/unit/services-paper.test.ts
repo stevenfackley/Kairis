@@ -22,6 +22,7 @@ vi.mock("@/lib/server/services/market", () => ({
 }));
 
 import { placePaperOrder } from "@/lib/server/services/paper";
+import { UnknownProductError } from "@/lib/server/services/shared";
 
 const USER = "user-1";
 const PRICE = 50000;
@@ -67,6 +68,22 @@ describe("placePaperOrder", () => {
     expect(trade.status).toBe("blocked");
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "risk", "blocked", expect.stringContaining("paper BUY BTC-USD $5000"));
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "blocked", expect.stringContaining("max position"));
+  });
+
+  it("blocks (does not halt) a custom product Coinbase does not list", async () => {
+    m.getMarketSnapshot.mockRejectedValue(new UnknownProductError("ZZZZ-USD"));
+    const { trade, decision } = await placePaperOrder(USER, { productId: "ZZZZ-USD", side: "BUY", quoteUsd: 100 });
+    expect(decision.outcome).toBe("blocked");
+    expect(decision.reasons).toEqual(["ZZZZ-USD is not a tradable Coinbase pair."]);
+    expect(decision.checks.find((c) => c.code === "provider-health")?.passed).toBe(true);
+    expect(trade).toMatchObject({ status: "blocked", price: 0, note: "ZZZZ-USD is not a tradable Coinbase pair." });
+  });
+
+  it("halts as degraded when the market feed itself is down", async () => {
+    m.getMarketSnapshot.mockRejectedValue(new Error("Coinbase public request failed (503): down"));
+    const { decision } = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+    expect(decision.outcome).toBe("halted");
+    expect(decision.reasons[0]).toBe("Exchange provider is degraded; execution is halted.");
   });
 
   it("keeps a user note on a blocked trade", async () => {

@@ -8,6 +8,7 @@ import {
   getReferencePrices,
   marketDataAgeMs
 } from "@/lib/server/services/market";
+import { isUnknownProductError } from "@/lib/server/services/shared";
 import type { Candle, Ticker } from "@/lib/types";
 
 function ticker(productId: string, price: number): Ticker {
@@ -66,6 +67,28 @@ describe("market snapshot cache", () => {
 
     expect(await getReferencePrice("BTC-USD")).toBe(60000);
     expect(await getReferencePrices(["BTC-USD", "ETH-USD", "SOL-USD", "BTC-USD"])).toEqual({ "BTC-USD": 60000, "ETH-USD": 3000 });
+  });
+
+  it("reports a product Coinbase does not list as an UnknownProductError, and an outage as a plain error", async () => {
+    __setMarketFetchers({
+      candles: async (productId) => {
+        if (productId === "ZZZZ-USD") throw new Error('Coinbase public request failed (404): {"error":"NOT_FOUND","message":"product ZZZZ-USD not found"}');
+        if (productId === "QQQQ-USD") throw new Error('Coinbase public request failed (400): {"error":"INVALID_ARGUMENT","message":"ProductID is invalid"}');
+        if (productId === "DOWN-USD") throw new Error("Coinbase public request failed (503): upstream unavailable");
+        throw new Error("Coinbase public request timed out after 8 s");
+      },
+      ticker: async (productId) => ticker(productId, 1)
+    });
+
+    const unknown = await getMarketSnapshot("ZZZZ-USD").catch((e: unknown) => e);
+    expect(isUnknownProductError(unknown)).toBe(true);
+    expect(String(unknown)).toContain("ZZZZ-USD is not a tradable Coinbase pair.");
+    expect(isUnknownProductError(await getMarketSnapshot("QQQQ-USD").catch((e: unknown) => e))).toBe(true);
+    for (const outage of ["DOWN-USD", "SLOW-USD"]) {
+      const error = await getMarketSnapshot(outage).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(isUnknownProductError(error)).toBe(false);
+    }
   });
 
   it("measures data age from the ticker trade time", () => {
