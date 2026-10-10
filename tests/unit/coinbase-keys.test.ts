@@ -119,7 +119,7 @@ describe("normalizeCoinbaseCredentials", () => {
 
   it("refuses non-P-256 EC keys, RSA keys, junk and damaged Ed25519 keys with plain messages and no key material", () => {
     const p384 = generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({ type: "sec1", format: "pem" }).toString();
-    const rsa = generateKeyPairSync("rsa", { modulusLength: 1024 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
     const { portal } = edKey();
     const damaged = Buffer.concat([Buffer.from(portal, "base64").subarray(0, 32), Buffer.alloc(32, 7)]).toString("base64");
     const cases: Array<[string, RegExp]> = [
