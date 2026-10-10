@@ -5,14 +5,24 @@ import { STRATEGY } from "@/lib/domain/strategy";
 import { env } from "@/lib/env";
 import { appendAudit } from "@/lib/server/repos/audit";
 import { getLimits } from "@/lib/server/repos/limits";
-import { previewAssisted, submitAssisted } from "@/lib/server/services/assisted";
+import { previewAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
 import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
 import { getMarketSnapshot } from "@/lib/server/services/market";
 import { buildRiskContext } from "@/lib/server/services/risk";
 import { errorMessage } from "@/lib/server/services/shared";
 import { refreshSignals } from "@/lib/server/services/signals";
+import type { AssistedOrder } from "@/lib/types";
 
 export type AutoCycleSummary = { evaluated: number; previewed: number; submitted: number; exited: number; skipped: string[] };
+
+/**
+ * Submits a previewed order and, as the trade page does, records the fill straight away when Coinbase
+ * already reports it. Sent means it reached the exchange: still `submitted`, or already `filled`.
+ */
+async function submitAndSettle(userId: string, orderId: string): Promise<{ order: AssistedOrder; sent: boolean }> {
+  const order = await settleAssisted(userId, await submitAssisted(userId, orderId));
+  return { order, sent: order.status === "submitted" || order.status === "filled" };
+}
 
 // Per-process guard: one cycle per account at a time, so a double click cannot stack orders.
 const running = new Set<string>();
@@ -71,11 +81,11 @@ async function cycle(userId: string): Promise<AutoCycleSummary> {
         continue;
       }
       summary.previewed += 1;
-      const submitted = await submitAssisted(userId, order.id);
-      if (submitted.status === "submitted") {
+      const submitted = await submitAndSettle(userId, order.id);
+      if (submitted.sent) {
         summary.submitted += 1;
       } else {
-        summary.skipped.push(`${signal.productId}: ${submitted.detail}`);
+        summary.skipped.push(`${signal.productId}: ${submitted.order.detail}`);
       }
     } catch (error) {
       summary.skipped.push(`${signal.productId}: ${errorMessage(error)}`);
@@ -118,24 +128,19 @@ async function exitDowntrends(userId: string, summary: AutoCycleSummary, context
       if (fast >= slow) {
         continue;
       }
-      // The whole position at the current price, in cents; the risk check allows the one-cent round-up.
-      const quoteUsd = Math.round(position.baseSize * snapshot.ticker.price * 100) / 100;
-      if (quoteUsd <= 0) {
-        summary.skipped.push(`${productId}: exit size rounds to zero.`);
-        continue;
-      }
-      const { decision, order } = await previewAssisted(userId, { productId, side: "SELL", quoteUsd });
+      // Sells the exact held coins (base_size), never a dollar figure that could round past the position.
+      const { decision, order } = await previewAssisted(userId, { productId, side: "SELL", quoteUsd: 0, closePosition: true });
       if (decision.outcome !== "approved") {
         summary.skipped.push(`${productId}: exit blocked: ${decision.reasons.join(" ")}`);
         continue;
       }
       summary.previewed += 1;
-      const submitted = await submitAssisted(userId, order.id);
-      if (submitted.status === "submitted") {
+      const submitted = await submitAndSettle(userId, order.id);
+      if (submitted.sent) {
         summary.submitted += 1;
         summary.exited += 1;
       } else {
-        summary.skipped.push(`${productId}: exit not submitted: ${submitted.detail}`);
+        summary.skipped.push(`${productId}: exit not submitted: ${submitted.order.detail}`);
       }
     } catch (error) {
       summary.skipped.push(`${productId}: exit failed: ${errorMessage(error)}`);

@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   refreshSignals: vi.fn(),
   previewAssisted: vi.fn(),
   submitAssisted: vi.fn(),
+  settleAssisted: vi.fn(),
   getLimits: vi.fn(),
   buildRiskContext: vi.fn(),
   getMarketSnapshot: vi.fn(),
@@ -13,7 +14,11 @@ const m = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/server/services/signals", () => ({ refreshSignals: m.refreshSignals }));
-vi.mock("@/lib/server/services/assisted", () => ({ previewAssisted: m.previewAssisted, submitAssisted: m.submitAssisted }));
+vi.mock("@/lib/server/services/assisted", () => ({
+  previewAssisted: m.previewAssisted,
+  submitAssisted: m.submitAssisted,
+  settleAssisted: m.settleAssisted
+}));
 vi.mock("@/lib/server/services/risk", () => ({ buildRiskContext: m.buildRiskContext }));
 vi.mock("@/lib/server/services/market", () => ({ getMarketSnapshot: m.getMarketSnapshot }));
 vi.mock("@/lib/server/repos/limits", () => ({ getLimits: m.getLimits }));
@@ -64,6 +69,8 @@ beforeEach(() => {
   m.buildRiskContext.mockResolvedValue({ positions: {} });
   m.appendAudit.mockResolvedValue(undefined);
   m.getConnectionStatus.mockResolvedValue({ userId: USER, provider: "coinbase", canTrade: true });
+  // By default nothing has filled yet: settle hands the submitted order back unchanged.
+  m.settleAssisted.mockImplementation(async (_user: string, order: Partial<AssistedOrder>) => order);
 });
 
 afterEach(() => {
@@ -139,6 +146,27 @@ describe("runAutoCycle", () => {
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "auto", "cycle", "Evaluated 3, previewed 1, submitted 1, exited 0. Skipped: SOL-USD: no ATR-based size available.");
   });
 
+  it("settles each submit as the trade page does and counts an order that already filled as submitted", async () => {
+    const { runAutoCycle } = await load({ auto: true, live: true });
+    m.refreshSignals.mockResolvedValue([signal("BTC-USD", "long", 2), signal("ETH-USD", "long", 2)]);
+    m.previewAssisted.mockImplementation(async (_user: string, intent: { productId: string }) => ({
+      decision: { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" },
+      order: { id: `order-${intent.productId}` },
+      preview: null
+    }));
+    m.submitAssisted.mockImplementation(async (_user: string, id: string) => ({ id, status: "submitted", detail: "Mock order accepted." }));
+    m.settleAssisted.mockImplementation(async (_user: string, order: Partial<AssistedOrder>) =>
+      order.id === "order-BTC-USD"
+        ? { ...order, status: "filled", detail: "Filled 0.0118 BTC at an average $84,000.00, fees $5.96." }
+        : { ...order, status: "cancelled", detail: "Coinbase reported CANCELLED; nothing was filled." }
+    );
+
+    const summary = await runAutoCycle(USER, { isOwner: true });
+
+    expect(m.settleAssisted).toHaveBeenCalledWith(USER, { id: "order-BTC-USD", status: "submitted", detail: "Mock order accepted." });
+    expect(summary).toMatchObject({ previewed: 2, submitted: 1, skipped: ["ETH-USD: Coinbase reported CANCELLED; nothing was filled."] });
+  });
+
   it("sizes an entry no larger than the product's per-symbol cap", async () => {
     const { runAutoCycle } = await load({ auto: true, live: true });
     m.getLimits.mockResolvedValue({ ...limits, perSymbolMaxUsd: { "BTC-USD": 300 } });
@@ -165,7 +193,7 @@ describe("runAutoCycle", () => {
     const falling = Array.from({ length: 40 }, (_, i) => 200 - i);
     const rising = Array.from({ length: 40 }, (_, i) => 100 + i);
 
-    it("sells the full position of a held product whose fast EMA is below the slow EMA", async () => {
+    it("sells the exact held coins of a product whose fast EMA is below the slow EMA", async () => {
       const { runAutoCycle } = await load({ auto: true, live: true });
       m.refreshSignals.mockResolvedValue([]);
       m.buildRiskContext.mockResolvedValue({
@@ -179,15 +207,32 @@ describe("runAutoCycle", () => {
         productId === "BTC-USD" ? snapshot(productId, falling, 161.11) : snapshot(productId, rising, 140)
       );
       m.previewAssisted.mockResolvedValue({ decision: approved, order: { id: "sell-1" }, preview: null });
-      m.submitAssisted.mockResolvedValue({ status: "submitted", detail: "ok" });
+      m.submitAssisted.mockResolvedValue({ id: "sell-1", status: "submitted", detail: "ok" });
+      m.settleAssisted.mockImplementation(async (_user: string, order: Partial<AssistedOrder>) => ({ ...order, status: "filled" }));
 
       const summary = await runAutoCycle(USER, { isOwner: true });
 
-      // 0.123456 * 161.11 = 19.89 (rounded to cents).
+      // closePosition sizes the sell by the held coins (base_size); a cents figure such as
+      // 0.123456 * 161.11 = 19.890... rounded up to $19.89 could ask for more than is held.
       expect(m.previewAssisted).toHaveBeenCalledTimes(1);
-      expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 19.89 });
+      expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
       expect(m.submitAssisted).toHaveBeenCalledWith(USER, "sell-1");
+      expect(m.settleAssisted).toHaveBeenCalledWith(USER, { id: "sell-1", status: "submitted", detail: "ok" });
       expect(summary).toEqual({ evaluated: 0, previewed: 1, submitted: 1, exited: 1, skipped: [] });
+    });
+
+    it("records an exit that settled with nothing filled as not submitted", async () => {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([]);
+      m.buildRiskContext.mockResolvedValue({ positions: { "BTC-USD": { baseSize: 0.5, avgCost: 150, notionalUsd: 0 } } });
+      m.getMarketSnapshot.mockResolvedValue(snapshot("BTC-USD", falling, 160));
+      m.previewAssisted.mockResolvedValue({ decision: approved, order: { id: "sell-1" }, preview: null });
+      m.submitAssisted.mockResolvedValue({ id: "sell-1", status: "submitted", detail: "ok" });
+      m.settleAssisted.mockResolvedValue({ id: "sell-1", status: "expired", detail: "Coinbase reported EXPIRED; nothing was filled." });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      expect(summary).toMatchObject({ submitted: 0, exited: 0, skipped: ["BTC-USD: exit not submitted: Coinbase reported EXPIRED; nothing was filled."] });
     });
 
     it("ignores dust-sized positions", async () => {
