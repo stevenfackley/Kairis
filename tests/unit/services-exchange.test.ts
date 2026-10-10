@@ -91,7 +91,7 @@ describe("connectCoinbase", () => {
     });
 
     await expect(connectCoinbase(USER, KEY_ID, PEM)).rejects.toThrow(
-      "Check provider credentials, key permissions, and live-trading gating variables. (auth_error)"
+      "Check provider credentials, key permissions, and live-trading gating variables. (auth_error: Coinbase request failed (401): unauthorized)"
     );
   });
 

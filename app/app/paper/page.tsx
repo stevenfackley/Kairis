@@ -10,6 +10,7 @@ import { WATCHLIST } from "@/lib/domain/strategy";
 import { num, usd, when } from "@/lib/format";
 import { getLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
+import { HISTORY_LIMIT } from "@/lib/server/services/risk";
 import { getReferencePrices } from "@/lib/server/services/market";
 import { requireOnboarded } from "@/lib/server/session";
 import type { DayStats, PaperTrade, TradingLimits } from "@/lib/types";
@@ -59,7 +60,7 @@ function noteCell(trade: PaperTrade): { note: string; reason: string | null } {
 export default async function PaperPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireOnboarded("/app/paper");
   const defaults = ticketDefaults(await searchParams);
-  const [limits, trades] = await Promise.all([getLimits(user.id), listPaperTrades(user.id, 1000)]);
+  const [limits, trades] = await Promise.all([getLimits(user.id), listPaperTrades(user.id, HISTORY_LIMIT)]);
   const held = Object.keys(buildPositions(trades, {}));
   const prices = held.length > 0 ? await getReferencePrices(held) : {};
   const positions = buildPositions(trades, prices);

@@ -36,7 +36,7 @@ export async function connectCoinbase(userId: string, keyId: string, secretPem: 
     permissions = await createCoinbaseClient({ keyId: id, secret }).keyPermissions();
   } catch (error) {
     const normalized = normalizeExchangeError(error);
-    throw new Error(normalized.recommendation + " (" + normalized.code + ")");
+    throw new Error(normalized.recommendation + " (" + normalized.code + ": " + normalized.message + ")");
   }
   const { canView, canTrade, canTransfer, portfolioUuid } = permissions;
   if (canTransfer) {
