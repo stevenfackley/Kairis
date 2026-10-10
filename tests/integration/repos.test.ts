@@ -159,6 +159,19 @@ describe.skipIf(!enabled)("repos", () => {
     expect(await getSignal(newestEth.id)).toEqual(newestEth);
   });
 
+  it("insertSignal stores out-of-range and non-finite indicator values instead of failing the refresh", async () => {
+    const wild = await insertSignal({
+      ...signal("SOL-USD", "2026-10-09T12:00:00.000Z", "wild"),
+      action: "blocked",
+      strength: Number.NaN,
+      referencePrice: Number.POSITIVE_INFINITY,
+      atrPct: Number.POSITIVE_INFINITY,
+      rsi: 250,
+      spreadPct: 999_900
+    });
+    expect(wild).toMatchObject({ strength: 0, referencePrice: 0, atrPct: null, rsi: 100, spreadPct: 9999.9999 });
+  });
+
   it("insertPaperTrade + listPaperTrades map side, numbers, fees and legacy planned rows", async () => {
     const base: PaperTrade = {
       id: "",
