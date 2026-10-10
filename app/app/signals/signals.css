@@ -1,0 +1,26 @@
+/* Signals page only. Prefixed so it cannot collide once loaded globally by the router. */
+
+.signals-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+}
+
+.signals-grid .signal-card {
+  background: var(--panel);
+}
+
+.signals-grid .signal-card .status-stack {
+  margin: 4px 0 12px;
+}
+
+.signals-grid .signal-actions {
+  margin-top: 14px;
+}
+
+.signals-grid .signal-card > .field-help:last-child {
+  margin-top: 10px;
+}
+
+.signals-grid .signal-meta {
+  margin-bottom: 8px;
+}
