@@ -8,7 +8,8 @@ const m = vi.hoisted(() => ({
   getLimits: vi.fn(),
   buildRiskContext: vi.fn(),
   getMarketSnapshot: vi.fn(),
-  appendAudit: vi.fn()
+  appendAudit: vi.fn(),
+  getConnectionStatus: vi.fn()
 }));
 
 vi.mock("@/lib/server/services/signals", () => ({ refreshSignals: m.refreshSignals }));
@@ -17,6 +18,7 @@ vi.mock("@/lib/server/services/risk", () => ({ buildRiskContext: m.buildRiskCont
 vi.mock("@/lib/server/services/market", () => ({ getMarketSnapshot: m.getMarketSnapshot }));
 vi.mock("@/lib/server/repos/limits", () => ({ getLimits: m.getLimits }));
 vi.mock("@/lib/server/repos/audit", () => ({ appendAudit: m.appendAudit }));
+vi.mock("@/lib/server/services/exchange-connection", () => ({ getConnectionStatus: m.getConnectionStatus }));
 
 const USER = "owner-1";
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   m.getLimits.mockResolvedValue(limits);
   m.buildRiskContext.mockResolvedValue({ positions: {} });
   m.appendAudit.mockResolvedValue(undefined);
+  m.getConnectionStatus.mockResolvedValue({ userId: USER, provider: "coinbase", canTrade: true });
 });
 
 afterEach(() => {
@@ -86,6 +89,41 @@ describe("runAutoCycle", () => {
     expect(m.refreshSignals).not.toHaveBeenCalled();
   });
 
+  it("refuses without a connected Coinbase key instead of trading against the mock provider", async () => {
+    const { runAutoCycle } = await load({ auto: true, live: true });
+    m.getConnectionStatus.mockResolvedValue(null);
+    await expect(runAutoCycle(USER, { isOwner: true })).rejects.toThrow("Auto mode needs a connected Coinbase key.");
+    expect(m.refreshSignals).not.toHaveBeenCalled();
+  });
+
+  it("never runs two cycles at once for the same account", async () => {
+    const { runAutoCycle } = await load({ auto: true, live: true });
+    let release: (value: never[]) => void = () => undefined;
+    m.refreshSignals.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+
+    const first = runAutoCycle(USER, { isOwner: true });
+    await expect(runAutoCycle(USER, { isOwner: true })).rejects.toThrow("An auto cycle is already running for this account; wait for it to finish.");
+    release([]);
+    await expect(first).resolves.toMatchObject({ evaluated: 0 });
+
+    m.refreshSignals.mockResolvedValue([]);
+    await expect(runAutoCycle(USER, { isOwner: true })).resolves.toMatchObject({ evaluated: 0 });
+  });
+
+  it("keeps going when one product fails", async () => {
+    const { runAutoCycle } = await load({ auto: true, live: true });
+    m.refreshSignals.mockResolvedValue([signal("BTC-USD", "long", 2), signal("ETH-USD", "long", 2)]);
+    m.previewAssisted.mockImplementation(async (_user: string, intent: { productId: string }) => {
+      if (intent.productId === "BTC-USD") throw new Error("Coinbase preview failed");
+      return { decision: { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" }, order: { id: "order-eth" }, preview: null };
+    });
+    m.submitAssisted.mockResolvedValue({ status: "submitted", detail: "ok" });
+
+    const summary = await runAutoCycle(USER, { isOwner: true });
+
+    expect(summary).toMatchObject({ previewed: 1, submitted: 1, skipped: ["BTC-USD: Coinbase preview failed"] });
+  });
+
   it("previews and submits sized long signals, skipping the rest with a reason", async () => {
     const { runAutoCycle } = await load({ auto: true, live: true });
     m.refreshSignals.mockResolvedValue([signal("BTC-USD", "long", 2), signal("ETH-USD", "observe", 1), signal("SOL-USD", "long", null)]);
@@ -98,7 +136,7 @@ describe("runAutoCycle", () => {
     expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 1500, signalId: "sig-BTC-USD" });
     expect(m.submitAssisted).toHaveBeenCalledWith(USER, "order-1");
     expect(summary).toEqual({ evaluated: 3, previewed: 1, submitted: 1, exited: 0, skipped: ["SOL-USD: no ATR-based size available."] });
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "auto", "cycle", JSON.stringify(summary));
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "auto", "cycle", "Evaluated 3, previewed 1, submitted 1, exited 0. Skipped: SOL-USD: no ATR-based size available.");
   });
 
   it("sizes an entry no larger than the product's per-symbol cap", async () => {
@@ -150,6 +188,32 @@ describe("runAutoCycle", () => {
       expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 19.89 });
       expect(m.submitAssisted).toHaveBeenCalledWith(USER, "sell-1");
       expect(summary).toEqual({ evaluated: 0, previewed: 1, submitted: 1, exited: 1, skipped: [] });
+    });
+
+    it("ignores dust-sized positions", async () => {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([]);
+      m.buildRiskContext.mockResolvedValue({ positions: { "BTC-USD": { baseSize: 1e-10, avgCost: 150, notionalUsd: 0 } } });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      expect(m.getMarketSnapshot).not.toHaveBeenCalled();
+      expect(summary.skipped).toEqual([]);
+    });
+
+    it("judges the exit trend on completed candles only", async () => {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([]);
+      m.buildRiskContext.mockResolvedValue({ positions: { "ETH-USD": { baseSize: 2, avgCost: 100, notionalUsd: 0 } } });
+      const closed = snapshot("ETH-USD", rising, 140);
+      // A crash inside the unfinished current hour would flip the trend if it were used.
+      const forming = { start: Math.floor(Date.now() / 1000) - 60, open: 139, high: 139, low: 20, close: 20, volume: 1 };
+      m.getMarketSnapshot.mockResolvedValue({ ...closed, candles: [...closed.candles, forming] });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      expect(m.previewAssisted).not.toHaveBeenCalled();
+      expect(summary.exited).toBe(0);
     });
 
     it("records a skip when the exit is blocked or the data is thin", async () => {

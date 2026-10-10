@@ -34,9 +34,10 @@ This repository is proprietary and is not open source. See [LICENSE](LICENSE) fo
 - **Records**: a filterable journal of audit events and CSV exports (paper journal, assisted orders,
   audit log) to a private Cloudflare R2 bucket, or local files when R2 is not configured. Exports are
   downloaded only through the signed-in `/app/reports/download/<id>` route.
-- **Owner operations**: system status, reconcile, and an auto cycle that runs only for owners and only
-  when `ENABLE_AUTO_MODE` and `ENABLE_LIVE_ASSISTED_TRADING` are both true. It opens long positions
-  on fresh signals and never sells.
+- **Owner operations**: system status, reconcile, and an auto cycle that runs only for owners, only
+  when `ENABLE_AUTO_MODE` and `ENABLE_LIVE_ASSISTED_TRADING` are both true and a Coinbase key is
+  connected, and only when the owner presses the button (there is no scheduler). It opens long
+  positions on fresh signals and sells a held position in full when its trend turns down.
 
 Limits: Coinbase only, spot only. P&L and limits only see trades made through Kairis. Exports written
 to the container's local disk are lost on redeploy unless R2 is configured.
