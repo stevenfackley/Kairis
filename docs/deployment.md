@@ -10,7 +10,7 @@ There is no test environment: CI and the local compose stack cover pre-productio
 | Piece | Owner | Where |
 |---|---|---|
 | ECR repo, OIDC role, hub tag and pull policy, tunnel, DNS, tunnel token in SSM | Terraform | `infra/` |
-| Host `.env` | GitHub environment secrets | `DOTENV_CONTENT`, optional `EXTRA_ENV_CONTENT` |
+| Host `.env` | GitHub environment `Prod` | variable `DOTENV_CONTENT` (config) plus one secret per secret value |
 | Schema migrations | deploy job, before the restart | `scripts/db-migrate.mjs` with `QAVREN_DB_PROD_SESSION_URL` |
 | Restart and health wait | SSM command from the deploy job | `/opt/kairis` on the hub |
 
@@ -18,6 +18,12 @@ The tunnel token reaches the host through SSM Parameter Store (`/kairis/prod/tun
 deploy time. It never goes through GitHub secrets. See [infra/README.md](../infra/README.md).
 
 ## One-time owner steps
+
+Status 2026-10-10: realms `kairis` and `kairis-dev` are live on the hosted Keycloak with
+self-registration and an `owner` realm role (qavren-auth PR #178); the Google broker redirect URIs
+still need adding to the shared Google OAuth client. GitHub variables and the app secrets are set
+(step d). Still open: step b (rotate the qavren-db role password and set the two database secrets),
+step c (`terraform apply`), the Google URIs, and the release tag.
 
 Run these in order. They need credentials an agent session does not hold. `<qavren-auth>` and
 `<qavren-db>` are your local checkouts of those repos.
@@ -93,26 +99,35 @@ The `session_url` becomes `QAVREN_DB_PROD_SESSION_URL`.
 
 ### d. GitHub variables and secrets
 
-Repository variables `AWS_REGION` and `ECR_REGISTRY` (output `ecr_registry`). Repository secret
-`AWS_OIDC_ROLE_ARN` (output `github_actions_role_arn`; the build job runs outside the environment).
-Environment `production` secrets `DOTENV_CONTENT`, optional `EXTRA_ENV_CONTENT`, and
-`QAVREN_DB_PROD_SESSION_URL`.
+The deploy job runs in the GitHub environment `Prod`. The host `.env` is assembled from one
+variable holding the non-secret configuration plus one secret per secret value, so a rotation never
+means retyping the rest.
 
-    gh variable set AWS_REGION --repo stevenfackley/Kairis --body us-east-1
-    gh variable set ECR_REGISTRY --repo stevenfackley/Kairis --body "<ecr_registry output>"
-    gh secret set AWS_OIDC_ROLE_ARN --repo stevenfackley/Kairis --body "<github_actions_role_arn output>"
-    gh secret set DOTENV_CONTENT --env production --repo stevenfackley/Kairis < env.txt
-    gh secret set QAVREN_DB_PROD_SESSION_URL --env production --repo stevenfackley/Kairis --body "<session_url>"
+Already set on 2026-10-10 (repository): variables `AWS_REGION=us-east-1`,
+`ECR_REGISTRY=918981046515.dkr.ecr.us-east-1.amazonaws.com`; secret `AWS_OIDC_ROLE_ARN` =
+`arn:aws:iam::918981046515:role/kairis-github-actions` (valid once Terraform has applied).
+Already set on 2026-10-10 (environment `Prod`): variable `DOTENV_CONTENT` (the block below),
+variables `R2_ACCOUNT_ID`, `R2_BUCKET=kairis-prod`, `R2_PUBLIC_URL` (empty), secrets
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `AUTH_SECRET`, `KAIRIS_SECRET_KEY`.
 
-Create the `production` environment first if it does not exist. Delete `env.txt` afterwards.
-`EXTRA_ENV_CONTENT` is appended after `DOTENV_CONTENT`. Use it to add or override one line without
-retyping the whole blob, which GitHub never shows again.
+Still to set, from step b's output:
+
+    gh secret set DATABASE_URL --env Prod --repo stevenfackley/Kairis --body "<pooler_url, port 6543>"
+    gh secret set QAVREN_DB_PROD_SESSION_URL --env Prod --repo stevenfackley/Kairis --body "<session_url, port 5432>"
+
+`DOTENV_CONTENT` is a variable, so it can be read back and edited line by line:
+
+    gh variable get DOTENV_CONTENT --env Prod --repo stevenfackley/Kairis
+
+`EXTRA_ENV_CONTENT` (optional secret) is appended after it for one-off overrides. The deploy
+appends `AUTH_SECRET`, `KAIRIS_SECRET_KEY`, `DATABASE_URL`, the five `R2_*` values, `ECR_REGISTRY`,
+`IMAGE_TAG` and `TUNNEL_TOKEN` itself.
 
 ### e. Release
 
 From an up-to-date `main` after the PR is merged:
 
-    git tag 20261009_v1_Release && git push origin 20261009_v1_Release
+    git tag 20261010_v1_Release && git push origin 20261010_v1_Release
 
 `deploy-prod` builds `prod-<sha>` and `latest`, runs migrations, writes `/opt/kairis/.env` and
 `compose.prod.yaml` over SSM, restarts, waits for the container to report healthy on `127.0.0.1:3040`,
@@ -128,33 +143,32 @@ then curls the public `/api/health`. To redeploy a ref, run the workflow manuall
 2. Set `ENABLE_LIVE_ASSISTED_TRADING=true` only after a real Coinbase key is connected and the legal
    review in the risk memo is done. Auto mode additionally needs `ENABLE_AUTO_MODE=true`.
 
-Both are edits to `EXTRA_ENV_CONTENT` (or `DOTENV_CONTENT`) followed by a redeploy.
+Both are edits to the `DOTENV_CONTENT` variable followed by a redeploy.
 
-## `env.txt`: the whole of `DOTENV_CONTENT`
+## `DOTENV_CONTENT`: the non-secret configuration
 
-The deploy appends `ECR_REGISTRY`, `IMAGE_TAG` and `TUNNEL_TOKEN` itself; do not include them.
+Set as an environment variable on `Prod`. Secrets are separate (see step d); do not put them here.
 
 ```
 NEXT_PUBLIC_APP_NAME=Kairis
 NEXT_PUBLIC_APP_ENV=production
 APP_BASE_URL=https://kairis.qavrensolutions.com
 AUTH_URL=https://kairis.qavrensolutions.com
-AUTH_SECRET=<32 random bytes, base64>
 AUTH_TRUST_HOST=true
 QAVREN_AUTH_URL=https://auth.qavrensolutions.com
 QAVREN_REALM=kairis
-KAIRIS_OWNER_EMAILS=<owner email, comma separated for several>
-KAIRIS_SECRET_KEY=<32 random bytes, base64; keep an offline copy>
-DATABASE_URL=<pooler_url from step b: role kairis.<ref>, port 6543>
+KAIRIS_OWNER_EMAILS=
 ENABLE_LIVE_ASSISTED_TRADING=false
 ENABLE_AUTO_MODE=false
-R2_ACCOUNT_ID=<Cloudflare account id>
-R2_ACCESS_KEY_ID=<R2 access key id>
-R2_SECRET_ACCESS_KEY=<R2 secret>
-R2_BUCKET=kairis-prod
-R2_PUBLIC_URL=
 LOCAL_DATA_DIR=.local-data
 ```
+
+Secrets on `Prod`: `AUTH_SECRET` and `KAIRIS_SECRET_KEY` (32 random bytes, base64 each; generated
+and set 2026-10-10, keep an offline copy of `KAIRIS_SECRET_KEY`), `DATABASE_URL` (pooler URL, role
+`kairis.<ref>`, port 6543), `QAVREN_DB_PROD_SESSION_URL` (port 5432, migrations only),
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Variables on `Prod`: `R2_ACCOUNT_ID`, `R2_BUCKET`,
+`R2_PUBLIC_URL`. `NEXT_PUBLIC_*` values are also baked into the image at build time by the
+Dockerfile, so changing them needs a rebuild, not just a redeploy.
 
 Generate each random value with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
 Losing `KAIRIS_SECRET_KEY` means every user reconnects their exchange key. Without the R2 values, exports

@@ -10,16 +10,18 @@ and gitignored.
     terraform init && terraform plan -out tfplan && terraform apply tfplan
     terraform output
 
-Then in GitHub: variables `AWS_REGION`, `ECR_REGISTRY`; repository secret `AWS_OIDC_ROLE_ARN` (the
-build job runs outside the environment); environment `production` secrets `DOTENV_CONTENT`,
-`EXTRA_ENV_CONTENT` (optional), `QAVREN_DB_PROD_SESSION_URL` (session-mode URL for migrations).
-The tunnel token reaches the host only via SSM Parameter Store (`/kairis/prod/tunnel_token`),
-read at deploy time; it never goes through GitHub secrets.
+Then in GitHub: repository variables `AWS_REGION`, `ECR_REGISTRY`; repository secret
+`AWS_OIDC_ROLE_ARN` (the build job runs outside the environment); environment `Prod` variable
+`DOTENV_CONTENT` (non-secret config), secrets `AUTH_SECRET`, `KAIRIS_SECRET_KEY`, `DATABASE_URL`,
+`QAVREN_DB_PROD_SESSION_URL` (session-mode URL for migrations), `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, and variables `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_PUBLIC_URL`. The tunnel
+token reaches the host only via SSM Parameter Store (`/kairis/prod/tunnel_token`), read at deploy
+time; it never goes through GitHub secrets. `docs/deployment.md` records what is already set.
 
 ## The host `.env`
 
-`DOTENV_CONTENT` is the whole of `/opt/kairis/.env` bar the lines the deploy appends
-(`ECR_REGISTRY`, `IMAGE_TAG`, `TUNNEL_TOKEN`). Keys the app needs:
+The deploy writes `/opt/kairis/.env` from `DOTENV_CONTENT`, then appends one line per secret and
+R2 variable above, then `ECR_REGISTRY`, `IMAGE_TAG`, `TUNNEL_TOKEN`. Keys the app needs:
 
     NEXT_PUBLIC_APP_NAME=Kairis
     NEXT_PUBLIC_APP_ENV=production

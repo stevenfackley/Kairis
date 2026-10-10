@@ -6,6 +6,10 @@ RUN npm ci
 FROM node:26-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next inlines NEXT_PUBLIC_* at build time, so the host .env cannot set these later.
+ARG NEXT_PUBLIC_APP_NAME=Kairis
+ARG NEXT_PUBLIC_APP_ENV=production
+ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME NEXT_PUBLIC_APP_ENV=$NEXT_PUBLIC_APP_ENV
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
