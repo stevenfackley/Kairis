@@ -3,6 +3,7 @@ import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { createMockClient } from "@/lib/exchange/mock";
 import type { ExchangeClient, OrderPreview, OrderStatus, OrderSubmitResult } from "@/lib/exchange/types";
 import {
+  claimPreviewedOrder,
   getAssistedOrder,
   insertAssistedOrder,
   listPendingAssistedOrders,
@@ -10,7 +11,7 @@ import {
   type AssistedOrderPatch
 } from "@/lib/server/repos/assisted";
 import { appendAudit } from "@/lib/server/repos/audit";
-import { getExchangeClient } from "@/lib/server/services/exchange-connection";
+import { getConnectionStatus, getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getReferencePrice } from "@/lib/server/services/market";
 import { checkOrder } from "@/lib/server/services/risk";
 import { errorMessage, storableUsd } from "@/lib/server/services/shared";
@@ -20,6 +21,8 @@ export const PREVIEW_TTL_MS = 120_000;
 const EXPIRED_DETAIL = "Preview expired after 2 minutes; preview again.";
 const LIVE_DISABLED_DETAIL = "Live assisted trading is disabled by environment policy (ENABLE_LIVE_ASSISTED_TRADING=false).";
 const PROVIDER_CHANGED_DETAIL = "The exchange connection changed since this preview; preview again.";
+const NO_TRADE_PERMISSION_DETAIL =
+  "The connected Coinbase key has no trade permission. Create a trade-only key (no transfer permission) and reconnect.";
 const UNKNOWN_STATUS_DETAIL = "Exchange returned an unknown status; check the order on Coinbase.";
 
 const label = (o: Pick<AssistedOrder, "side" | "productId" | "quoteUsd">) => `${o.side} ${o.productId} $${o.quoteUsd}`;
@@ -71,6 +74,24 @@ export async function previewAssisted(
     return { decision, order: await record(userId, order, "blocked"), preview: null };
   }
 
+  if (client.provider === "coinbase" && (await getConnectionStatus(userId))?.canTrade === false) {
+    const blocked: RiskDecision = {
+      outcome: "blocked",
+      checks: [...decision.checks, { code: "exchange-key", passed: false, detail: NO_TRADE_PERMISSION_DETAIL }],
+      reasons: [...decision.reasons, NO_TRADE_PERMISSION_DETAIL],
+      evaluatedAt: decision.evaluatedAt
+    };
+    const order = await insertAssistedOrder({
+      ...base,
+      status: "blocked",
+      reconcileState: "error",
+      reconciledAt: new Date().toISOString(),
+      detail: NO_TRADE_PERMISSION_DETAIL,
+      riskDecision: blocked
+    });
+    return { decision: blocked, order: await record(userId, order, "blocked"), preview: null };
+  }
+
   let preview: OrderPreview;
   try {
     preview = await client.previewOrder({ productId: live.productId, side: live.side, quoteUsd: live.quoteUsd });
@@ -92,17 +113,24 @@ export async function previewAssisted(
 
 // The Kairis order id doubles as the Coinbase client_order_id, so a retried submit cannot double-fill.
 export async function submitAssisted(userId: string, orderId: string): Promise<AssistedOrder> {
-  const order = await getAssistedOrder(orderId, userId);
+  const order = await claimPreviewedOrder(orderId, userId);
   if (!order) {
-    throw new Error("Order not found.");
+    const existing = await getAssistedOrder(orderId, userId);
+    if (!existing) {
+      throw new Error("Order not found.");
+    }
+    throw new Error(existing.status !== "previewed" ? "Only a previewed order can be submitted." : "This order is already being submitted.");
   }
-  if (order.status !== "previewed") {
-    throw new Error("Only a previewed order can be submitted.");
-  }
-  const block = async (detail: string) =>
+  const block = async (detail: string, riskDecision?: RiskDecision) =>
     record(
       userId,
-      await updateAssistedOrder(order.id, { status: "blocked", reconcileState: "error", reconciledAt: new Date().toISOString(), detail }),
+      await updateAssistedOrder(order.id, {
+        status: "blocked",
+        reconcileState: "error",
+        reconciledAt: new Date().toISOString(),
+        detail,
+        riskDecision
+      }),
       "blocked"
     );
 
@@ -126,15 +154,15 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     signalId: order.signalId
   });
   if (decision.outcome !== "approved") {
-    return block(decision.reasons.join(" "));
+    return block(decision.reasons.join(" "), decision);
   }
 
   const client = await getExchangeClient(userId);
   if (client.provider !== order.provider) {
-    return block(PROVIDER_CHANGED_DETAIL);
+    return block(PROVIDER_CHANGED_DETAIL, decision);
   }
   if (client.provider === "coinbase" && !env.liveAssistedTradingEnabled) {
-    return block(LIVE_DISABLED_DETAIL);
+    return block(LIVE_DISABLED_DETAIL, decision);
   }
 
   let result: OrderSubmitResult;
@@ -164,7 +192,8 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     clientOrderId: order.id,
     reconcileState: result.success ? "pending" : "error",
     reconciledAt: result.success ? null : new Date().toISOString(),
-    detail: result.detail
+    detail: result.detail,
+    riskDecision: decision
   });
   return record(userId, submitted, submitted.status);
 }

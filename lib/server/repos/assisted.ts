@@ -10,7 +10,7 @@ import {
   type Numeric,
   type Timestamp
 } from "@/lib/server/repos/map";
-import type { AssistedOrder, AssistedStatus, ReconcileState, Side } from "@/lib/types";
+import type { AssistedOrder, AssistedStatus, ReconcileState, RiskDecision, Side } from "@/lib/types";
 
 type AssistedOrderRow = {
   id: string;
@@ -51,7 +51,7 @@ export type AssistedOrderPatch = Partial<
     | "averagePrice"
     | "totalFees"
   >
->;
+> & { riskDecision?: RiskDecision | null };
 
 const COLUMNS =
   "id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, order_id, client_order_id, preview_id, exchange_status, filled_size, average_price, total_fees, signal_id, risk_decision, created_at, updated_at";
@@ -68,7 +68,8 @@ const PATCH_COLUMNS: { [K in keyof Required<AssistedOrderPatch>]: string } = {
   exchangeStatus: "exchange_status",
   filledSize: "filled_size",
   averagePrice: "average_price",
-  totalFees: "total_fees"
+  totalFees: "total_fees",
+  riskDecision: "risk_decision"
 };
 
 function isPatchKey(key: string): key is keyof AssistedOrderPatch {
@@ -142,6 +143,11 @@ export async function updateAssistedOrder(id: string, patch: AssistedOrderPatch)
     if (value === undefined || !isPatchKey(key)) {
       continue;
     }
+    if (key === "riskDecision") {
+      params.push(toJsonParam(value));
+      sets.push(`risk_decision = $${params.length}::jsonb`);
+      continue;
+    }
     params.push(value);
     sets.push(`${PATCH_COLUMNS[key]} = $${params.length}`);
   }
@@ -159,6 +165,17 @@ export async function updateAssistedOrder(id: string, patch: AssistedOrderPatch)
 
 export async function getAssistedOrder(id: string, userId: string): Promise<AssistedOrder | null> {
   const rows = await query<AssistedOrderRow>(`select ${COLUMNS} from assisted_orders where id = $1 and user_id = $2`, [id, userId]);
+  return rows[0] ? mapAssistedOrder(rows[0]) : null;
+}
+
+// Atomic single-flight guard: only one caller can flip a previewed, unclaimed order to claimed.
+export async function claimPreviewedOrder(id: string, userId: string): Promise<AssistedOrder | null> {
+  const rows = await query<AssistedOrderRow>(
+    `update assisted_orders set submit_claimed_at = now(), updated_at = now()
+     where id = $1 and user_id = $2 and status = 'previewed' and submit_claimed_at is null
+     returning ${COLUMNS}`,
+    [id, userId]
+  );
   return rows[0] ? mapAssistedOrder(rows[0]) : null;
 }
 

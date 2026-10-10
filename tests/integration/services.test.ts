@@ -4,23 +4,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Runs before the imports below evaluate lib/env.ts. The suite gets its own Postgres schema (via the
-// connection's search_path) because vitest runs test files in parallel and repos.test.ts truncates the
-// same tables. Exports go to a scratch folder, never to R2, and live assisted trading stays off: the
-// mock provider is what this suite drives.
-const { schema, scratchDir } = vi.hoisted(() => {
-  const isolated = { schema: "kairis_services_test", scratchDir: ".local-data/test-services" };
-  const url = process.env.DATABASE_URL ?? "";
-  if (url) {
-    const options = encodeURIComponent(`-c search_path=${isolated.schema}`);
-    process.env.DATABASE_URL = `${url}${url.includes("?") ? "&" : "?"}options=${options}`;
-  }
-  process.env.LOCAL_DATA_DIR = isolated.scratchDir;
+// Runs before the imports below evaluate lib/env.ts. Exports go to a scratch folder, never to R2, and
+// live assisted trading stays off: the mock provider is what this suite drives. Files run serially
+// (vitest.config.ts), so this suite shares the database and truncation pattern with repos.test.ts.
+const { scratchDir } = vi.hoisted(() => {
+  const dir = ".local-data/test-services";
+  process.env.LOCAL_DATA_DIR = dir;
   process.env.ENABLE_LIVE_ASSISTED_TRADING = "false";
   for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) {
     delete process.env[key];
   }
-  return isolated;
+  return { scratchDir: dir };
 });
 
 import { closePool, query } from "@/lib/server/db";
@@ -68,7 +62,6 @@ function ticker(productId: string): Ticker {
 
 describe.skipIf(!enabled)("services", () => {
   beforeAll(async () => {
-    await query(`create schema if not exists ${schema}`);
     execFileSync("node", ["scripts/db-migrate.mjs"], { cwd: repoRoot, env: process.env, stdio: "pipe" });
     __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
   });
@@ -82,7 +75,6 @@ describe.skipIf(!enabled)("services", () => {
   afterAll(async () => {
     __setMarketFetchers(null);
     await rm(path.resolve(repoRoot, scratchDir), { recursive: true, force: true });
-    await query(`drop schema if exists ${schema} cascade`);
     await closePool();
   });
 
@@ -146,6 +138,22 @@ describe.skipIf(!enabled)("services", () => {
     expect(actions).toEqual(["previewed", "submitted"]);
   });
 
+  it("lets exactly one of two concurrent submits through", async () => {
+    const { order } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
+    const results = await Promise.allSettled([submitAssisted(USER, order.id), submitAssisted(USER, order.id)]);
+
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof submitAssisted>>> => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0].reason)).toMatch(/already being submitted/);
+    expect(fulfilled[0].value.status).toBe("submitted");
+
+    const rows = await query<{ order_id: string | null }>("select order_id from assisted_orders where order_id is not null");
+    expect(rows).toHaveLength(1);
+    expect((await getAssistedOrder(order.id, USER))?.riskDecision?.outcome).toBe("approved");
+  });
+
   it("writes a paper-journal export to a local CSV file with the header row", async () => {
     await placePaperOrder(USER, { productId: "ETH-USD", side: "BUY", quoteUsd: 25, note: "has, a comma" });
 
@@ -154,7 +162,7 @@ describe.skipIf(!enabled)("services", () => {
     expect(artifact).toMatchObject({ userId: USER, type: "paper-journal", storage: "local" });
     expect(path.isAbsolute(artifact.location)).toBe(true);
     expect(artifact.location.startsWith(path.resolve(repoRoot, scratchDir, "exports"))).toBe(true);
-    expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.csv$/);
+    expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}\.csv$/);
     const lines = (await readFile(artifact.location, "utf8")).split("\n");
     expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,status,realizedPnlUsd,signalId,note");
     expect(lines).toHaveLength(2);

@@ -6,11 +6,15 @@ const m = vi.hoisted(() => ({
   previewAssisted: vi.fn(),
   submitAssisted: vi.fn(),
   getLimits: vi.fn(),
+  buildRiskContext: vi.fn(),
+  getMarketSnapshot: vi.fn(),
   appendAudit: vi.fn()
 }));
 
 vi.mock("@/lib/server/services/signals", () => ({ refreshSignals: m.refreshSignals }));
 vi.mock("@/lib/server/services/assisted", () => ({ previewAssisted: m.previewAssisted, submitAssisted: m.submitAssisted }));
+vi.mock("@/lib/server/services/risk", () => ({ buildRiskContext: m.buildRiskContext }));
+vi.mock("@/lib/server/services/market", () => ({ getMarketSnapshot: m.getMarketSnapshot }));
 vi.mock("@/lib/server/repos/limits", () => ({ getLimits: m.getLimits }));
 vi.mock("@/lib/server/repos/audit", () => ({ appendAudit: m.appendAudit }));
 
@@ -55,6 +59,7 @@ async function load(flags: { auto: boolean; live: boolean }) {
 beforeEach(() => {
   vi.resetAllMocks();
   m.getLimits.mockResolvedValue(limits);
+  m.buildRiskContext.mockResolvedValue({ positions: {} });
   m.appendAudit.mockResolvedValue(undefined);
 });
 
@@ -92,7 +97,65 @@ describe("runAutoCycle", () => {
     // 300 * 0.25 / 2% = 3750, capped at the 1500 max position.
     expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 1500, signalId: "sig-BTC-USD" });
     expect(m.submitAssisted).toHaveBeenCalledWith(USER, "order-1");
-    expect(summary).toEqual({ evaluated: 3, previewed: 1, submitted: 1, skipped: ["SOL-USD: no ATR-based size available."] });
+    expect(summary).toEqual({ evaluated: 3, previewed: 1, submitted: 1, exited: 0, skipped: ["SOL-USD: no ATR-based size available."] });
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "auto", "cycle", JSON.stringify(summary));
+  });
+
+  describe("exits", () => {
+    const approved = { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" };
+
+    function snapshot(productId: string, closes: number[], price: number) {
+      return {
+        candles: closes.map((close, i) => ({ start: i, open: close, high: close, low: close, close, volume: 1 })),
+        ticker: { productId, price, bestBid: price, bestAsk: price, tradeTime: Date.now() },
+        fetchedAt: Date.now()
+      };
+    }
+
+    const falling = Array.from({ length: 40 }, (_, i) => 200 - i);
+    const rising = Array.from({ length: 40 }, (_, i) => 100 + i);
+
+    it("sells the full position of a held product whose fast EMA is below the slow EMA", async () => {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([]);
+      m.buildRiskContext.mockResolvedValue({
+        positions: {
+          "BTC-USD": { baseSize: 0.123456, avgCost: 150, notionalUsd: 0 },
+          "ETH-USD": { baseSize: 2, avgCost: 100, notionalUsd: 0 },
+          "SOL-USD": { baseSize: 0, avgCost: 0, notionalUsd: 0 }
+        }
+      });
+      m.getMarketSnapshot.mockImplementation(async (productId: string) =>
+        productId === "BTC-USD" ? snapshot(productId, falling, 161.11) : snapshot(productId, rising, 140)
+      );
+      m.previewAssisted.mockResolvedValue({ decision: approved, order: { id: "sell-1" }, preview: null });
+      m.submitAssisted.mockResolvedValue({ status: "submitted", detail: "ok" });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      // 0.123456 * 161.11 = 19.89 (rounded to cents).
+      expect(m.previewAssisted).toHaveBeenCalledTimes(1);
+      expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 19.89 });
+      expect(m.submitAssisted).toHaveBeenCalledWith(USER, "sell-1");
+      expect(summary).toEqual({ evaluated: 0, previewed: 1, submitted: 1, exited: 1, skipped: [] });
+    });
+
+    it("records a skip when the exit is blocked or the data is thin", async () => {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([]);
+      m.buildRiskContext.mockResolvedValue({
+        positions: { "BTC-USD": { baseSize: 1, avgCost: 150, notionalUsd: 0 }, "ETH-USD": { baseSize: 1, avgCost: 100, notionalUsd: 0 } }
+      });
+      m.getMarketSnapshot.mockImplementation(async (productId: string) =>
+        productId === "BTC-USD" ? snapshot(productId, falling, 160) : snapshot(productId, [1, 2, 3], 3)
+      );
+      m.previewAssisted.mockResolvedValue({ decision: { ...approved, outcome: "blocked", reasons: ["Trading is paused."] }, order: { id: "x" }, preview: null });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      expect(m.submitAssisted).not.toHaveBeenCalled();
+      expect(summary.exited).toBe(0);
+      expect(summary.skipped).toEqual(["BTC-USD: exit blocked: Trading is paused.", "ETH-USD: not enough candles to judge the trend for an exit."]);
+    });
   });
 });

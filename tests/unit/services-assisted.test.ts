@@ -5,6 +5,7 @@ import type { AssistedOrder, TradingLimits } from "@/lib/types";
 
 const m = vi.hoisted(() => ({
   getAssistedOrder: vi.fn(),
+  claimPreviewedOrder: vi.fn(),
   updateAssistedOrder: vi.fn(),
   insertAssistedOrder: vi.fn(),
   listPendingAssistedOrders: vi.fn(),
@@ -15,11 +16,13 @@ const m = vi.hoisted(() => ({
   getMarketSnapshot: vi.fn(),
   getReferencePrices: vi.fn(),
   getReferencePrice: vi.fn(),
-  getExchangeClient: vi.fn()
+  getExchangeClient: vi.fn(),
+  getConnectionStatus: vi.fn()
 }));
 
 vi.mock("@/lib/server/repos/assisted", () => ({
   getAssistedOrder: m.getAssistedOrder,
+  claimPreviewedOrder: m.claimPreviewedOrder,
   updateAssistedOrder: m.updateAssistedOrder,
   insertAssistedOrder: m.insertAssistedOrder,
   listPendingAssistedOrders: m.listPendingAssistedOrders,
@@ -34,7 +37,10 @@ vi.mock("@/lib/server/services/market", () => ({
   getReferencePrice: m.getReferencePrice,
   marketDataAgeMs: (s: { ticker: { tradeTime: number } }, nowMs: number) => nowMs - s.ticker.tradeTime
 }));
-vi.mock("@/lib/server/services/exchange-connection", () => ({ getExchangeClient: m.getExchangeClient }));
+vi.mock("@/lib/server/services/exchange-connection", () => ({
+  getExchangeClient: m.getExchangeClient,
+  getConnectionStatus: m.getConnectionStatus
+}));
 
 const USER = "user-1";
 const PRICE = 50000;
@@ -100,10 +106,12 @@ async function load(liveEnabled: boolean) {
 }
 
 let current: AssistedOrder;
+let claimed = false;
 
 beforeEach(() => {
   vi.resetAllMocks();
   current = order();
+  claimed = false;
   m.getLimits.mockResolvedValue(limits);
   m.listPaperTrades.mockResolvedValue([]);
   m.listAssistedOrders.mockResolvedValue([]);
@@ -116,6 +124,13 @@ beforeEach(() => {
   m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
   m.getReferencePrice.mockResolvedValue(PRICE);
   m.getAssistedOrder.mockImplementation(async () => current);
+  m.claimPreviewedOrder.mockImplementation(async () => {
+    if (current.status !== "previewed" || claimed) {
+      return null;
+    }
+    claimed = true;
+    return current;
+  });
   m.updateAssistedOrder.mockImplementation(async (_id: string, patch: Partial<AssistedOrder>) => {
     current = { ...current, ...patch };
     return current;
@@ -126,11 +141,57 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("previewAssisted", () => {
+  const NO_TRADE = "The connected Coinbase key has no trade permission. Create a trade-only key (no transfer permission) and reconnect.";
+
+  beforeEach(() => {
+    m.insertAssistedOrder.mockImplementation(async (o: AssistedOrder) => ({ ...o, id: ORDER_ID }));
+  });
+
+  it("blocks without calling the exchange when the connected key cannot trade", async () => {
+    const { previewAssisted } = await load(true);
+    const previewOrder = vi.fn();
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: false });
+
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+
+    expect(previewOrder).not.toHaveBeenCalled();
+    expect(result.preview).toBeNull();
+    expect(result.decision.outcome).toBe("blocked");
+    expect(result.decision.checks).toContainEqual({ code: "exchange-key", passed: false, detail: NO_TRADE });
+    expect(result.decision.reasons).toContain(NO_TRADE);
+    expect(result.order).toMatchObject({ status: "blocked", reconcileState: "error", detail: NO_TRADE });
+    expect(result.order.reconciledAt).not.toBeNull();
+  });
+
+  it("previews normally when the key can trade", async () => {
+    const { previewAssisted } = await load(true);
+    const previewOrder = vi.fn(async () => ({ previewId: "p1", orderTotal: 100, commissionTotal: 0.6, bestBid: 1, bestAsk: 1, warnings: [] }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+
+    expect(previewOrder).toHaveBeenCalledOnce();
+    expect(result.order.status).toBe("previewed");
+  });
+});
+
 describe("submitAssisted", () => {
   it("throws when the order does not exist", async () => {
     const { submitAssisted } = await load(false);
+    m.claimPreviewedOrder.mockResolvedValue(null);
     m.getAssistedOrder.mockResolvedValue(null);
     await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("Order not found.");
+  });
+
+  it("refuses an order another caller already claimed", async () => {
+    const { submitAssisted } = await load(true);
+    claimed = true;
+    await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("This order is already being submitted.");
+    expect(m.updateAssistedOrder).not.toHaveBeenCalled();
+    expect(m.getExchangeClient).not.toHaveBeenCalled();
   });
 
   it("refuses an order that is not in the previewed state", async () => {
@@ -174,6 +235,7 @@ describe("submitAssisted", () => {
     const result = await submitAssisted(USER, ORDER_ID);
 
     expect(result).toMatchObject({ status: "submitted", orderId: "mock-order-1", clientOrderId: ORDER_ID, reconcileState: "pending", reconciledAt: null });
+    expect(result.riskDecision?.outcome).toBe("approved");
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "assisted-order", "submitted", expect.stringContaining("BUY BTC-USD $100"));
   });
 
