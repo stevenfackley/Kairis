@@ -93,14 +93,14 @@ describe("placePaperOrder", () => {
     expect(trade).toMatchObject({ status: "blocked", note: "testing the pause" });
   });
 
-  it("fills an approved order at the reference price with the matching base size and a 0.6% taker fee", async () => {
+  it("fills an approved buy at the reference price, spending the quote with the 0.6% taker fee included", async () => {
     const { trade, decision } = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, signalId: "sig-1" });
 
     expect(decision.outcome).toBe("approved");
-    expect(trade).toMatchObject({ status: "filled", price: PRICE, quoteUsd: 100, feeUsd: 0.6, realizedPnlUsd: 0, signalId: "sig-1", note: "" });
-    expect(trade.baseSize).toBeCloseTo(0.002, 12);
+    // 100 / 1.006 = 99.40357853 buys 0.00198807 BTC at $50,000; the other 0.59642147 is the fee.
+    expect(trade).toMatchObject({ status: "filled", price: PRICE, quoteUsd: 100, baseSize: 0.00198807, feeUsd: 0.59642147, realizedPnlUsd: 0, signalId: "sig-1", note: "" });
     expect(trade.riskDecision).toEqual(decision);
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", "BUY 0.002 BTC-USD at $50,000.00 ($100.00), fee $0.60, realized $0.00.");
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", "BUY 0.00198807 BTC-USD at $50,000.00: spent $100.00 including a $0.60 fee.");
   });
 
   it("rejects a fill too large for the size column with a readable error before inserting", async () => {
@@ -113,7 +113,8 @@ describe("placePaperOrder", () => {
     m.getReferencePrices.mockResolvedValue({ "BONK-USD": 0.00001 });
 
     await expect(placePaperOrder(USER, { productId: "BONK-USD", side: "BUY", quoteUsd: 1_000_000 })).rejects.toThrow(
-      "This order is too large to record: 100,000,000,000 BONK is more than Kairis can store. Use a smaller order."
+      // 1,000,000 / 1.006 of filled value at $0.00001.
+      "This order is too large to record: 99,403,578,529 BONK is more than Kairis can store. Use a smaller order."
     );
     expect(m.insertPaperTrade).not.toHaveBeenCalled();
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "rejected", expect.stringContaining("too large to record"));

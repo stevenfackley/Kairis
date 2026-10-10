@@ -53,9 +53,12 @@ export async function placePaperOrder(
       throw new Error(unstorable);
     }
     trade = await insertPaperTrade({ ...base, status: "filled", ...fill, note: userNote });
+    const filledValue = fill.baseSize * fill.price;
     detail =
-      `${order.side} ${num(fill.baseSize, 8)} ${order.productId} at ${usdPrice(fill.price)} (${usd(order.quoteUsd)}), ` +
-      `fee ${usd(fill.feeUsd)}, realized ${usd(fill.realizedPnlUsd)}.`;
+      `${order.side} ${num(fill.baseSize, 8)} ${order.productId} at ${usdPrice(fill.price)}: ` +
+      (order.side === "BUY"
+        ? `spent ${usd(filledValue + fill.feeUsd)} including a ${usd(fill.feeUsd)} fee.`
+        : `proceeds ${usd(filledValue - fill.feeUsd)} after a ${usd(fill.feeUsd)} fee, realized ${usd(fill.realizedPnlUsd)}.`);
   }
   await appendAudit(userId, "paper-trade", trade.status, detail);
   return { trade, decision };

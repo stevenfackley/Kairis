@@ -81,8 +81,9 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
         </div>
         <h1>Paper trading</h1>
         <p className="lede">
-          Simulated fills at the current Coinbase price, each charged a {feePct}% taker fee like a live market order. Same
-          risk engine as live. No money moves.
+          Simulated fills at the current Coinbase price, each charged a {feePct}% taker fee the way Coinbase charges a
+          market order: a buy spends exactly the dollars you enter, fee included, and a sell&apos;s fee comes out of the
+          proceeds. Same risk engine as live. No money moves.
         </p>
       </header>
 

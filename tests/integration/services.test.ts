@@ -117,7 +117,8 @@ describe.skipIf(!enabled)("services", () => {
 
     const first = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
     expect(first.decision.outcome).toBe("approved");
-    expect(first.trade).toMatchObject({ status: "filled", baseSize: 6, price: PRICE, quoteUsd: 600, feeUsd: 3.6 });
+    // $600 spent including the 0.6% fee, as on Coinbase: 600 / 1.006 = 596.42147117 of coins, 3.57852883 fee.
+    expect(first.trade).toMatchObject({ status: "filled", baseSize: 5.96421471, price: PRICE, quoteUsd: 600, feeUsd: 3.57852883 });
     expect(first.trade.id).toMatch(/^[0-9a-f-]{36}$/);
 
     const second = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
@@ -132,9 +133,10 @@ describe.skipIf(!enabled)("services", () => {
     expect(await listAudit(USER, { category: "risk" })).toHaveLength(2);
 
     const context = await buildRiskContext(USER, "paper", "BTC-USD");
-    // The 0.6% buy fee ($3.60) is part of the cost basis: (600 + 3.60) / 6 = 100.60.
-    expect(context.positions["BTC-USD"]).toMatchObject({ baseSize: 6, notionalUsd: 600 });
-    expect(context.positions["BTC-USD"]?.avgCost).toBeCloseTo(100.6, 10);
+    // The fee is part of the cost basis, which is the $600 spent: 600 / 5.96421471 = 100.60 a coin.
+    expect(context.positions["BTC-USD"]?.baseSize).toBe(5.96421471);
+    expect(context.positions["BTC-USD"]?.notionalUsd).toBeCloseTo(596.421471, 8);
+    expect(context.positions["BTC-USD"]?.avgCost).toBeCloseTo(100.6, 6);
     expect(context.today.tradesCount).toBe(1);
   });
 
@@ -143,8 +145,9 @@ describe.skipIf(!enabled)("services", () => {
     const closed = await placePaperOrder(USER, { productId: "SOL-USD", side: "SELL", quoteUsd: 0, sellAll: true });
 
     expect(closed.decision.outcome).toBe("approved");
-    expect(closed.trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.3333, quoteUsd: 33.33 });
-    // Flat at the same price: both 0.6% fees are lost, 2 x 0.19998 = 0.39996, stored to the cent.
+    // $33.33 bought 0.33131213 SOL (0.19878728 fee included); the sell pays 0.6% of 33.131213 = 0.19878728.
+    expect(closed.trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.33131213, quoteUsd: 33.13, feeUsd: 0.19878728 });
+    // Flat at the same price: both fees are lost, 33.131213 - 0.19878728 - 33.33 = -0.39757456, stored to the cent.
     expect(closed.trade.realizedPnlUsd).toBe(-0.4);
     const context = await buildRiskContext(USER, "paper", "SOL-USD");
     expect(context.positions["SOL-USD"]).toBeUndefined();
@@ -217,7 +220,7 @@ describe.skipIf(!enabled)("services", () => {
     const lines = (await readFile(artifact.location, "utf8")).split("\n");
     expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,feeUsd,status,realizedPnlUsd,signalId,note");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain(",ETH-USD,BUY,0.25,100,25,0.15,filled,0,,\"has, a comma\"");
+    expect(lines[1]).toContain(",ETH-USD,BUY,0.24850895,100,25,0.14910537,filled,0,,\"has, a comma\"");
     expect(await listExports(USER)).toEqual([artifact]);
     expect(await listAudit(USER, { category: "export" })).toHaveLength(1);
 

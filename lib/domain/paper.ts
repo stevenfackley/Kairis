@@ -25,9 +25,9 @@ export function isFlat(baseSize: number): boolean {
 }
 
 /**
- * Applies one fill to the running average-cost lots. A buy adds its notional plus its fee to the cost
- * basis; a sell reduces the size and leaves the average cost alone; a dust remainder resets to flat so a
- * later buy starts a fresh average.
+ * Applies one fill to the running average-cost lots. A buy adds its filled value plus its fee to the cost
+ * basis (for a fee-inclusive buy that is the dollars spent); a sell reduces the size and leaves the
+ * average cost alone; a dust remainder resets to flat so a later buy starts a fresh average.
  */
 export function applyFill(lots: Record<string, Lot>, f: Fill): void {
   const cur = lots[f.productId] ?? { baseSize: 0, avgCost: 0 };
@@ -67,8 +67,11 @@ export function realizeSell(held: Lot | undefined, size: number, price: number, 
 }
 
 /**
- * Simulated taker fill at the reference price. The fee is `feeRate` of the filled notional. A sell is
- * capped at the held size, and closes the whole position when only dust would remain or when
+ * Simulated taker fill at the reference price, charged the way Coinbase charges a market order.
+ * A BUY of Q dollars spends exactly Q, fee included (Coinbase's size_inclusive_of_fees quote_size): the
+ * filled value is Q / (1 + feeRate), the fee is the rest, and the coins are the filled value / price, so
+ * the cost basis is Q. A SELL of N coins pays `feeRate` of its gross N * price out of the proceeds. A sell
+ * is capped at the held size, and closes the whole position when only dust would remain or when
  * `closePosition` asks for exactly that.
  */
 export function fillPaperOrder(
@@ -79,10 +82,12 @@ export function fillPaperOrder(
   opts: { closePosition?: boolean } = {}
 ): { baseSize: number; price: number; feeUsd: number; realizedPnlUsd: number } {
   const price = round8(referencePrice);
-  const requested = price > 0 ? round8(intent.quoteUsd / price) : 0;
   if (intent.side === "BUY") {
-    return { baseSize: requested, price, feeUsd: round8(requested * price * feeRate), realizedPnlUsd: 0 };
+    if (!(price > 0 && intent.quoteUsd > 0)) return { baseSize: 0, price, feeUsd: 0, realizedPnlUsd: 0 };
+    const filledValue = intent.quoteUsd / (1 + feeRate);
+    return { baseSize: round8(filledValue / price), price, feeUsd: round8(intent.quoteUsd - filledValue), realizedPnlUsd: 0 };
   }
+  const requested = price > 0 ? round8(intent.quoteUsd / price) : 0;
   const held = positions[intent.productId];
   const heldSize = held && !isFlat(held.baseSize) ? held.baseSize : 0;
   let size = Math.min(requested, heldSize);

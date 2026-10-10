@@ -17,12 +17,16 @@ type PaperTicketProps = {
 
 type Result = NonNullable<PaperTicketState["result"]>;
 
+/** Coinbase semantics: a buy's dollars include the fee; a sell's fee comes out of the proceeds. */
 function resultLine({ trade, decision }: Result): string {
   if (trade.status === "filled") {
-    const verb = trade.side === "BUY" ? "bought" : "sold";
-    const fee = ` Fee ${usd(trade.feeUsd ?? 0)}.`;
-    const pnl = trade.side === "SELL" ? ` Realized ${usd(trade.realizedPnlUsd)} after fees.` : "";
-    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usdPrice(trade.price)}.${fee}${pnl}`;
+    const fee = trade.feeUsd ?? 0;
+    const filledValue = trade.baseSize * trade.price;
+    const coins = `${num(trade.baseSize, 8)} ${trade.productId.split("-")[0]} at ${usdPrice(trade.price)}`;
+    if (trade.side === "BUY") {
+      return `Filled: bought ${coins} for ${usd(filledValue + fee)}, including the ${usd(fee)} fee.`;
+    }
+    return `Filled: sold ${coins} for ${usd(filledValue - fee)} after the ${usd(fee)} fee. Realized ${usd(trade.realizedPnlUsd)} after fees.`;
   }
   const label = decision.outcome === "halted" ? "Halted" : "Blocked";
   return `${label}: ${decision.reasons[0] ?? "a risk check failed."} Nothing was filled; the attempt is in your journal.`;

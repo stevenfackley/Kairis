@@ -61,10 +61,28 @@ describe("isFlat", () => {
 });
 
 describe("fillPaperOrder", () => {
-  it("fills a buy at the reference price and charges the taker fee on the notional", () => {
-    const f = fillPaperOrder({ "BTC-USD": undefined }, { productId: "BTC-USD", side: "BUY", quoteUsd: 50, mode: "paper" }, 200);
-    expect(f).toEqual({ baseSize: 0.25, price: 200, feeUsd: 0.3, realizedPnlUsd: 0 });
+  it("spends exactly the quote on a buy, fee included, as Coinbase does", () => {
     expect(PAPER_TAKER_FEE_RATE).toBe(0.006);
+    // $100 at $100: filled value 100 / 1.006 = 99.40357853, fee 0.59642147, coins 0.99403579.
+    const f = fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, mode: "paper" }, 100);
+    expect(f).toEqual({ baseSize: 0.99403579, price: 100, feeUsd: 0.59642147, realizedPnlUsd: 0 });
+    expect(f.baseSize * f.price + f.feeUsd).toBeCloseTo(100, 6);
+    expect(fillPaperOrder({ "BTC-USD": undefined }, { productId: "BTC-USD", side: "BUY", quoteUsd: 50, mode: "paper" }, 200)).toEqual({
+      baseSize: 0.24850895,
+      price: 200,
+      feeUsd: 0.29821074,
+      realizedPnlUsd: 0
+    });
+  });
+  it("matches the mock exchange's fee-inclusive buy to the satoshi", async () => {
+    const { createMockClient } = await import("@/lib/exchange/mock");
+    const mock = createMockClient(async () => 100, () => "id");
+    const preview = await mock.previewOrder({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "100" } });
+    const f = fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, mode: "paper" }, 100);
+    expect({ baseSize: f.baseSize, feeUsd: f.feeUsd }).toEqual({ baseSize: preview.baseSize, feeUsd: preview.commissionTotal });
+  });
+  it("fills nothing on a buy without a usable price", () => {
+    expect(fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, mode: "paper" }, 0)).toEqual({ baseSize: 0, price: 0, feeUsd: 0, realizedPnlUsd: 0 });
   });
   it("realizes P&L on a sell net of the sell fee, against an average cost that already holds the buy fee", () => {
     const f = fillPaperOrder({ "BTC-USD": { baseSize: 2, avgCost: 100.6, notionalUsd: 300 } }, { productId: "BTC-USD", side: "SELL", quoteUsd: 150, mode: "paper" }, 150);
@@ -73,11 +91,16 @@ describe("fillPaperOrder", () => {
     // 150 proceeds - 0.90 fee - 100.60 cost = 48.50
     expect(f.realizedPnlUsd).toBeCloseTo(48.5, 10);
   });
-  it("a flat round trip loses both fees (about 1.2%)", () => {
+  it("a flat round trip loses both fees (about 1.19%)", () => {
     const buy = fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, mode: "paper" }, 100);
     const positions = buildPositions([t({ baseSize: buy.baseSize, price: buy.price, feeUsd: buy.feeUsd })], {});
+    // The cost basis is the $100 spent, fee included.
+    expect(positions["BTC-USD"]!.baseSize * positions["BTC-USD"]!.avgCost).toBeCloseTo(100, 6);
     const sell = fillPaperOrder(positions, { productId: "BTC-USD", side: "SELL", quoteUsd: 100, mode: "paper" }, 100);
-    expect(sell.realizedPnlUsd).toBeCloseTo(-1.2, 10);
+    expect(sell.baseSize).toBe(0.99403579);
+    // Proceeds 99.403579 - 0.59642147 sell fee = 98.80715753 against the $100 spent.
+    expect(sell.feeUsd).toBe(0.59642147);
+    expect(sell.realizedPnlUsd).toBeCloseTo(-1.19284294, 6);
   });
   it("caps a sell at the held size and closes the position when only dust would remain", () => {
     const held = { "BTC-USD": { baseSize: 1, avgCost: 100, notionalUsd: 100 } };
@@ -90,8 +113,8 @@ describe("fillPaperOrder", () => {
   it("rounds size and price to the 8 decimals the database stores, so rebuilt positions match the fill", () => {
     const f = fillPaperOrder({}, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, mode: "paper" }, 61234.567891234);
     expect(f.price).toBe(61234.56789123);
-    expect(f.baseSize).toBe(0.00163306); // 100 / 61234.56789123 = 0.0016330645...
-    expect(f.feeUsd).toBe(Math.round(f.baseSize * f.price * 0.006 * 1e8) / 1e8);
+    expect(f.baseSize).toBe(0.00162332); // 100 / 1.006 / 61234.56789123 = 0.0016233245...
+    expect(f.feeUsd).toBe(0.59642147);
   });
   it("closes the exact held size when asked to, whatever the dollar size rounds to", () => {
     const held = { "BTC-USD": { baseSize: 0.12345678, avgCost: 100, notionalUsd: 0 } };

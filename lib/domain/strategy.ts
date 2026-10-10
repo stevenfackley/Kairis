@@ -20,9 +20,9 @@ export const STRATEGY = {
   signalRefreshAfterMs: 15 * 60 * 1000
 } as const;
 /**
- * Simulated taker fee on every paper fill (Coinbase Advanced's entry-tier taker rate). Buy fees go into
- * the position's cost basis and sell fees come out of the proceeds, so a flat round trip loses ~1.2 %,
- * as it would live.
+ * Simulated taker fee on every paper fill (Coinbase Advanced's entry-tier taker rate). As on Coinbase, a
+ * buy's dollar size includes its fee (the fee goes into the cost basis) and a sell's fee comes out of the
+ * proceeds, so a flat round trip loses ~1.19 %, as it would live.
  */
 export const PAPER_TAKER_FEE_RATE = 0.006;
 /** A base size smaller than this is floating-point dust: the position counts as flat everywhere. */
