@@ -14,7 +14,9 @@ $patterns = @(
 ) -join '|'
 foreach ($p in $Paths) {
     if (-not (Test-Path $p)) { continue }
-    $hits = Select-String -Path (Get-ChildItem $p -Recurse -File).FullName -Pattern $patterns -AllMatches 2>$null
+    $files = (Get-ChildItem $p -Recurse -File).FullName | Where-Object { [IO.Path]::GetFullPath($_) -ne [IO.Path]::GetFullPath($PSCommandPath) }
+    if (-not $files) { continue }
+    $hits = Select-String -Path $files -Pattern $patterns -AllMatches 2>$null
     if ($hits) {
         Write-Host "::error::Secret-shape:" -ForegroundColor Red
         $hits | ForEach-Object { Write-Host "  $($_.Path):$($_.LineNumber): $($_.Line)" }

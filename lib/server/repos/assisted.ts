@@ -179,6 +179,15 @@ export async function claimPreviewedOrder(id: string, userId: string): Promise<A
   return rows[0] ? mapAssistedOrder(rows[0]) : null;
 }
 
+// Frees a claim taken by claimPreviewedOrder when submission failed before reaching the exchange.
+export async function releaseSubmitClaim(id: string, userId: string): Promise<void> {
+  await query(
+    `update assisted_orders set submit_claimed_at = null, updated_at = now()
+     where id = $1 and user_id = $2 and status = 'previewed'`,
+    [id, userId]
+  );
+}
+
 export async function listAssistedOrders(userId: string, limit = 100): Promise<AssistedOrder[]> {
   const rows = await query<AssistedOrderRow>(
     `select ${COLUMNS} from assisted_orders where user_id = $1 order by created_at desc limit $2`,

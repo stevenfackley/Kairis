@@ -11,6 +11,7 @@ import { getOnboarding } from "@/lib/server/repos/onboarding";
 import { listPaperTrades } from "@/lib/server/repos/paper";
 import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
 import { getReferencePrices } from "@/lib/server/services/market";
+import { HISTORY_LIMIT } from "@/lib/server/services/risk";
 import { latestSignalsWithSizing } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
 import type { AssistedStatus, ExecutionMode, SignalAction, TradeMode } from "@/lib/types";
@@ -43,7 +44,7 @@ export default async function DashboardPage() {
     limitsPromise.then((l) => latestSignalsWithSizing(l)),
     getOnboarding(user.id),
     getConnectionStatus(user.id),
-    listPaperTrades(user.id, 1000),
+    listPaperTrades(user.id, HISTORY_LIMIT),
     listAssistedOrders(user.id, 50)
   ]);
   const held = Object.keys(buildPositions(paperTrades, {}));

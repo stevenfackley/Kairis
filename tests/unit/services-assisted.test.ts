@@ -6,6 +6,7 @@ import type { AssistedOrder, TradingLimits } from "@/lib/types";
 const m = vi.hoisted(() => ({
   getAssistedOrder: vi.fn(),
   claimPreviewedOrder: vi.fn(),
+  releaseSubmitClaim: vi.fn(),
   updateAssistedOrder: vi.fn(),
   insertAssistedOrder: vi.fn(),
   listPendingAssistedOrders: vi.fn(),
@@ -23,6 +24,7 @@ const m = vi.hoisted(() => ({
 vi.mock("@/lib/server/repos/assisted", () => ({
   getAssistedOrder: m.getAssistedOrder,
   claimPreviewedOrder: m.claimPreviewedOrder,
+  releaseSubmitClaim: m.releaseSubmitClaim,
   updateAssistedOrder: m.updateAssistedOrder,
   insertAssistedOrder: m.insertAssistedOrder,
   listPendingAssistedOrders: m.listPendingAssistedOrders,
@@ -130,6 +132,9 @@ beforeEach(() => {
     }
     claimed = true;
     return current;
+  });
+  m.releaseSubmitClaim.mockImplementation(async () => {
+    claimed = false;
   });
   m.updateAssistedOrder.mockImplementation(async (_id: string, patch: Partial<AssistedOrder>) => {
     current = { ...current, ...patch };
@@ -271,6 +276,20 @@ describe("submitAssisted", () => {
 
     await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("Coinbase request failed (503): unavailable");
     expect(current).toMatchObject({ status: "failed", reconcileState: "error" });
+    expect(m.releaseSubmitClaim).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim when the risk check throws before the exchange, so the order can be resubmitted", async () => {
+    const { submitAssisted } = await load(false);
+    m.getLimits.mockRejectedValueOnce(new Error("db down"));
+    m.getExchangeClient.mockResolvedValue(createMockClient(async () => PRICE, () => "mock-order-2"));
+
+    await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("db down");
+    expect(m.releaseSubmitClaim).toHaveBeenCalledWith(ORDER_ID, USER);
+    expect(current.status).toBe("previewed");
+
+    const retry = await submitAssisted(USER, ORDER_ID);
+    expect(retry).toMatchObject({ status: "submitted", orderId: "mock-order-2" });
   });
 });
 

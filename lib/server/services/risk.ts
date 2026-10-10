@@ -11,7 +11,7 @@ import type { AssistedOrder, OrderIntent, RiskContext, RiskDecision, Side, Trade
 type Fill = { productId: string; side: Side; baseSize: number; price: number; realizedPnlUsd: number; createdAt: string; status: "filled" };
 
 // Positions and day stats are rebuilt from the full history; the list repos default to small pages.
-const HISTORY_LIMIT = 100_000;
+export const HISTORY_LIMIT = 100_000;
 
 async function snapshotOrNull(productId: string): Promise<MarketSnapshot | null> {
   try {

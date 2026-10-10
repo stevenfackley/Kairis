@@ -7,6 +7,7 @@ import {
   getAssistedOrder,
   insertAssistedOrder,
   listPendingAssistedOrders,
+  releaseSubmitClaim,
   updateAssistedOrder,
   type AssistedOrderPatch
 } from "@/lib/server/repos/assisted";
@@ -134,35 +135,54 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
       "blocked"
     );
 
-  if (Date.now() - Date.parse(order.createdAt) > PREVIEW_TTL_MS) {
-    const expired = await updateAssistedOrder(order.id, {
-      status: "expired",
-      reconcileState: "reconciled",
-      reconciledAt: new Date().toISOString(),
-      detail: EXPIRED_DETAIL
+  type Gate = { settled: AssistedOrder; client?: undefined; decision?: undefined } | { settled?: undefined; client: ExchangeClient; decision: RiskDecision };
+  const preflight = async (): Promise<Gate> => {
+    if (Date.now() - Date.parse(order.createdAt) > PREVIEW_TTL_MS) {
+      const expired = await updateAssistedOrder(order.id, {
+        status: "expired",
+        reconcileState: "reconciled",
+        reconciledAt: new Date().toISOString(),
+        detail: EXPIRED_DETAIL
+      });
+      await record(userId, expired, "expired");
+      throw new Error(EXPIRED_DETAIL);
+    }
+
+    // Limits are re-checked at submit time: fills or a pause since the preview must win.
+    const { decision } = await checkOrder(userId, {
+      productId: order.productId,
+      side: order.side,
+      quoteUsd: order.quoteUsd,
+      mode: "live",
+      signalId: order.signalId
     });
-    await record(userId, expired, "expired");
-    throw new Error(EXPIRED_DETAIL);
-  }
+    if (decision.outcome !== "approved") {
+      return { settled: await block(decision.reasons.join(" "), decision) };
+    }
 
-  // Limits are re-checked at submit time: fills or a pause since the preview must win.
-  const { decision } = await checkOrder(userId, {
-    productId: order.productId,
-    side: order.side,
-    quoteUsd: order.quoteUsd,
-    mode: "live",
-    signalId: order.signalId
-  });
-  if (decision.outcome !== "approved") {
-    return block(decision.reasons.join(" "), decision);
-  }
+    const client = await getExchangeClient(userId);
+    if (client.provider !== order.provider) {
+      return { settled: await block(PROVIDER_CHANGED_DETAIL, decision) };
+    }
+    if (client.provider === "coinbase" && !env.liveAssistedTradingEnabled) {
+      return { settled: await block(LIVE_DISABLED_DETAIL, decision) };
+    }
+    return { client, decision };
+  };
 
-  const client = await getExchangeClient(userId);
-  if (client.provider !== order.provider) {
-    return block(PROVIDER_CHANGED_DETAIL, decision);
-  }
-  if (client.provider === "coinbase" && !env.liveAssistedTradingEnabled) {
-    return block(LIVE_DISABLED_DETAIL, decision);
+  // Until createOrder is reached nothing has left the building, so a throw here must free the claim.
+  // After that point a retry could double-send, so the claim stays.
+  let client: ExchangeClient;
+  let decision: RiskDecision;
+  try {
+    const gate = await preflight();
+    if (gate.settled) {
+      return gate.settled;
+    }
+    ({ client, decision } = gate);
+  } catch (error) {
+    await releaseSubmitClaim(order.id, userId);
+    throw error;
   }
 
   let result: OrderSubmitResult;
