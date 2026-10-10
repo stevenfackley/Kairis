@@ -16,7 +16,8 @@ const m = vi.hoisted(() => ({
   getMarketSnapshot: vi.fn(),
   getReferencePrices: vi.fn(),
   getReferencePrice: vi.fn(),
-  getExchangeClient: vi.fn()
+  getExchangeClient: vi.fn(),
+  getConnectionStatus: vi.fn()
 }));
 
 vi.mock("@/lib/server/repos/assisted", () => ({
@@ -36,7 +37,10 @@ vi.mock("@/lib/server/services/market", () => ({
   getReferencePrice: m.getReferencePrice,
   marketDataAgeMs: (s: { ticker: { tradeTime: number } }, nowMs: number) => nowMs - s.ticker.tradeTime
 }));
-vi.mock("@/lib/server/services/exchange-connection", () => ({ getExchangeClient: m.getExchangeClient }));
+vi.mock("@/lib/server/services/exchange-connection", () => ({
+  getExchangeClient: m.getExchangeClient,
+  getConnectionStatus: m.getConnectionStatus
+}));
 
 const USER = "user-1";
 const PRICE = 50000;
@@ -135,6 +139,43 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("previewAssisted", () => {
+  const NO_TRADE = "The connected Coinbase key has no trade permission. Create a trade-only key (no transfer permission) and reconnect.";
+
+  beforeEach(() => {
+    m.insertAssistedOrder.mockImplementation(async (o: AssistedOrder) => ({ ...o, id: ORDER_ID }));
+  });
+
+  it("blocks without calling the exchange when the connected key cannot trade", async () => {
+    const { previewAssisted } = await load(true);
+    const previewOrder = vi.fn();
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: false });
+
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+
+    expect(previewOrder).not.toHaveBeenCalled();
+    expect(result.preview).toBeNull();
+    expect(result.decision.outcome).toBe("blocked");
+    expect(result.decision.checks).toContainEqual({ code: "exchange-key", passed: false, detail: NO_TRADE });
+    expect(result.decision.reasons).toContain(NO_TRADE);
+    expect(result.order).toMatchObject({ status: "blocked", reconcileState: "error", detail: NO_TRADE });
+    expect(result.order.reconciledAt).not.toBeNull();
+  });
+
+  it("previews normally when the key can trade", async () => {
+    const { previewAssisted } = await load(true);
+    const previewOrder = vi.fn(async () => ({ previewId: "p1", orderTotal: 100, commissionTotal: 0.6, bestBid: 1, bestAsk: 1, warnings: [] }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+
+    expect(previewOrder).toHaveBeenCalledOnce();
+    expect(result.order.status).toBe("previewed");
+  });
 });
 
 describe("submitAssisted", () => {

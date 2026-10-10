@@ -11,7 +11,7 @@ import {
   type AssistedOrderPatch
 } from "@/lib/server/repos/assisted";
 import { appendAudit } from "@/lib/server/repos/audit";
-import { getExchangeClient } from "@/lib/server/services/exchange-connection";
+import { getConnectionStatus, getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getReferencePrice } from "@/lib/server/services/market";
 import { checkOrder } from "@/lib/server/services/risk";
 import { errorMessage, storableUsd } from "@/lib/server/services/shared";
@@ -21,6 +21,8 @@ export const PREVIEW_TTL_MS = 120_000;
 const EXPIRED_DETAIL = "Preview expired after 2 minutes; preview again.";
 const LIVE_DISABLED_DETAIL = "Live assisted trading is disabled by environment policy (ENABLE_LIVE_ASSISTED_TRADING=false).";
 const PROVIDER_CHANGED_DETAIL = "The exchange connection changed since this preview; preview again.";
+const NO_TRADE_PERMISSION_DETAIL =
+  "The connected Coinbase key has no trade permission. Create a trade-only key (no transfer permission) and reconnect.";
 const UNKNOWN_STATUS_DETAIL = "Exchange returned an unknown status; check the order on Coinbase.";
 
 const label = (o: Pick<AssistedOrder, "side" | "productId" | "quoteUsd">) => `${o.side} ${o.productId} $${o.quoteUsd}`;
@@ -70,6 +72,24 @@ export async function previewAssisted(
       detail: decision.reasons.join(" ")
     });
     return { decision, order: await record(userId, order, "blocked"), preview: null };
+  }
+
+  if (client.provider === "coinbase" && (await getConnectionStatus(userId))?.canTrade === false) {
+    const blocked: RiskDecision = {
+      outcome: "blocked",
+      checks: [...decision.checks, { code: "exchange-key", passed: false, detail: NO_TRADE_PERMISSION_DETAIL }],
+      reasons: [...decision.reasons, NO_TRADE_PERMISSION_DETAIL],
+      evaluatedAt: decision.evaluatedAt
+    };
+    const order = await insertAssistedOrder({
+      ...base,
+      status: "blocked",
+      reconcileState: "error",
+      reconciledAt: new Date().toISOString(),
+      detail: NO_TRADE_PERMISSION_DETAIL,
+      riskDecision: blocked
+    });
+    return { decision: blocked, order: await record(userId, order, "blocked"), preview: null };
   }
 
   let preview: OrderPreview;
