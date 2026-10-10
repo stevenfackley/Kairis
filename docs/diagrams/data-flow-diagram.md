@@ -23,9 +23,10 @@ This document describes the logical data movement for Kairis. It is intentionall
 
 ## Infrastructure Mapping
 
-- identity, entitlements, operational records, and other relational data are assumed to live in managed `Postgres`, currently `Supabase`
-- generated exports and file-like artifacts are assumed to live in `Cloudflare R2`
-- application services should remain portable between local Proxmox test environments and AWS EC2 production hosting
+- sign-in and credentials are handled by qavren-auth (Keycloak); Kairis records are keyed by the Keycloak subject
+- entitlements, operational records, and other relational data live in the `kairis` schema on qavren-db (shared Supabase Postgres)
+- generated exports and file-like artifacts live in `Cloudflare R2`, or on local disk when R2 is not configured
+- the application runs as one container on the shared Qavren hub behind a Cloudflare tunnel
 
 ## Core Flows
 
