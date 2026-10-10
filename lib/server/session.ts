@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { signInPath } from "@/lib/auth/paths";
 import { isOwner } from "@/lib/domain/owner";
 import { env } from "@/lib/env";
+import { getOnboarding } from "@/lib/server/repos/onboarding";
 
 export type CurrentUser = {
   id: string;
@@ -32,5 +33,13 @@ export async function requireUser(callbackUrl: string): Promise<CurrentUser> {
 export async function requireOwner(callbackUrl: string): Promise<CurrentUser> {
   const user = await requireUser(callbackUrl);
   if (!user.isOwner) notFound();
+  return user;
+}
+
+/** Signed in and past the risk acknowledgment. Pages call this: layouts do not re-run on client navigation. */
+export async function requireOnboarded(callbackUrl: string): Promise<CurrentUser> {
+  const user = await requireUser(callbackUrl);
+  const onboarding = await getOnboarding(user.id);
+  if (!onboarding.riskAcknowledged) redirect("/app/onboarding");
   return user;
 }
