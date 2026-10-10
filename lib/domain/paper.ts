@@ -91,18 +91,33 @@ export function fillPaperOrder(
   return { baseSize: size, price, feeUsd, realizedPnlUsd: realizeSell(held, size, price, feeUsd) };
 }
 
+/** Only fills this recent can build a loss streak: an old streak never starts a cooldown. */
+export const STREAK_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Stats for the current UTC day (00:00-24:00 UTC), used by the risk engine and shown as "today (UTC)".
+ * Stats used by the risk engine and shown as "today (UTC)". The trade count and realized P&L cover the
+ * current UTC day (00:00-24:00 UTC). The loss streak ignores the day boundary so a cooldown survives
+ * midnight: it walks filled orders newest-first over the last 24 hours, counting realized losses until
+ * the first realized gain (zero-P&L fills such as buys neither count nor break it).
  * Only filled orders count: a blocked attempt is not a trade. Only sells realize P&L, so a buy (fee and
  * all) never counts as a loss; a sell with any realized loss, fees included, does.
  */
 export function dayStats(trades: ReadonlyArray<{ createdAt: string; status: string; realizedPnlUsd: number }>, now: Date): DayStats {
   const day = now.toISOString().slice(0, 10);
-  const today = trades.filter((t) => t.status === "filled" && t.createdAt.slice(0, 10) === day).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const filled = trades.filter((t) => t.status === "filled");
+  const today = filled.filter((t) => t.createdAt.slice(0, 10) === day);
+  const cutoff = now.getTime() - STREAK_WINDOW_MS;
+  const recent = filled
+    .filter((t) => new Date(t.createdAt).getTime() > cutoff)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   let consecutiveLosses = 0;
   let lastLossAt: string | null = null;
-  for (const t of today) {
-    if (t.realizedPnlUsd < 0) { consecutiveLosses += 1; lastLossAt = t.createdAt; } else if (t.realizedPnlUsd > 0) consecutiveLosses = 0;
+  for (const t of recent) {
+    if (t.realizedPnlUsd > 0) break;
+    if (t.realizedPnlUsd < 0) {
+      consecutiveLosses += 1;
+      lastLossAt ??= t.createdAt;
+    }
   }
   return { tradesCount: today.length, realizedPnlUsd: today.reduce((a, t) => a + t.realizedPnlUsd, 0), consecutiveLosses, lastLossAt };
 }

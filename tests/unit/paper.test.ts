@@ -139,4 +139,28 @@ describe("dayStats", () => {
     const now = new Date("2026-10-09T12:00:00Z");
     expect(dayStats([t({ status: "blocked" }), t({ status: "blocked" })], now).tradesCount).toBe(0);
   });
+  describe("loss streak across midnight", () => {
+    const streak = [
+      t({ createdAt: "2026-10-08T23:40:00Z", side: "SELL", realizedPnlUsd: -5 }),
+      t({ createdAt: "2026-10-08T23:50:00Z", side: "SELL", realizedPnlUsd: -5 })
+    ];
+    it("keeps the streak and last loss past 00:00 UTC while today's counts reset", () => {
+      const s = dayStats(streak, new Date("2026-10-09T00:05:00Z"));
+      expect(s).toEqual({ tradesCount: 0, realizedPnlUsd: 0, consecutiveLosses: 2, lastLossAt: "2026-10-08T23:50:00Z" });
+    });
+    it("ignores losses older than 24 hours", () => {
+      const s = dayStats([t({ createdAt: "2026-10-02T10:00:00Z", side: "SELL", realizedPnlUsd: -5 }), t({ createdAt: "2026-10-02T11:00:00Z", side: "SELL", realizedPnlUsd: -5 })], new Date("2026-10-09T12:00:00Z"));
+      expect(s).toMatchObject({ consecutiveLosses: 0, lastLossAt: null });
+    });
+    it("resets the streak on a gain but skips zero-P&L buys", () => {
+      const now = new Date("2026-10-09T12:00:00Z");
+      const s = dayStats([
+        t({ createdAt: "2026-10-09T08:00:00Z", side: "SELL", realizedPnlUsd: -5 }),
+        t({ createdAt: "2026-10-09T09:00:00Z", side: "SELL", realizedPnlUsd: 3 }),
+        t({ createdAt: "2026-10-09T10:00:00Z", side: "SELL", realizedPnlUsd: -2 }),
+        t({ createdAt: "2026-10-09T11:00:00Z", side: "BUY", realizedPnlUsd: 0 })
+      ], now);
+      expect(s).toMatchObject({ consecutiveLosses: 1, lastLossAt: "2026-10-09T10:00:00Z" });
+    });
+  });
 });
