@@ -2,15 +2,11 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
-    schedule: { interval: weekly, day: monday }
-    open-pull-requests-limit: 10
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 3
     groups:
-      next-react:
-        patterns: ["next", "react*", "eslint-config-next"]
-      tooling:
-        patterns: ["eslint*", "vitest"]
-      testing:
-        patterns: ["vitest*", "@testing-library/*", "@playwright/*", "jsdom"]
+      npm-all:
+        patterns: ["*"]
     ignore:
       # TypeScript 7.0 is the native "Corsa" rewrite — a breaking major that
       # fails typecheck (Dependabot #85, closed 2026-07-13). Allow 6.x, block 7+.
@@ -19,8 +15,18 @@ updates:
 
   - package-ecosystem: docker
     directory: /
-    schedule: { interval: weekly, day: monday }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 3
 
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly, day: monday }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 3
+    groups:
+      actions-all:
+        patterns: ["*"]
+
+  - package-ecosystem: terraform
+    directory: /infra
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 3
