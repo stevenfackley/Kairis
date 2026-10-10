@@ -61,7 +61,7 @@ describe("placePaperOrder", () => {
     expect(decision.checks.find((c) => c.code === "max-position")?.passed).toBe(false);
     expect(m.insertPaperTrade).toHaveBeenCalledTimes(1);
     const inserted = m.insertPaperTrade.mock.calls[0]![0] as PaperTrade;
-    expect(inserted).toMatchObject({ id: "", createdAt: "", status: "blocked", baseSize: 0, price: PRICE, realizedPnlUsd: 0, quoteUsd: 5000 });
+    expect(inserted).toMatchObject({ id: "", createdAt: "", status: "blocked", baseSize: 0, price: PRICE, feeUsd: null, realizedPnlUsd: 0, quoteUsd: 5000 });
     expect(inserted.riskDecision).toEqual(decision);
     expect(inserted.note).toContain("max position");
     expect(trade.status).toBe("blocked");
@@ -76,14 +76,30 @@ describe("placePaperOrder", () => {
     expect(trade).toMatchObject({ status: "blocked", note: "testing the pause" });
   });
 
-  it("fills an approved order at the reference price with the matching base size", async () => {
+  it("fills an approved order at the reference price with the matching base size and a 0.6% taker fee", async () => {
     const { trade, decision } = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100, signalId: "sig-1" });
 
     expect(decision.outcome).toBe("approved");
-    expect(trade).toMatchObject({ status: "filled", price: PRICE, quoteUsd: 100, realizedPnlUsd: 0, signalId: "sig-1", note: "" });
+    expect(trade).toMatchObject({ status: "filled", price: PRICE, quoteUsd: 100, feeUsd: 0.6, realizedPnlUsd: 0, signalId: "sig-1", note: "" });
     expect(trade.baseSize).toBeCloseTo(0.002, 12);
     expect(trade.riskDecision).toEqual(decision);
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", expect.stringContaining("BUY 0.002 BTC-USD at $50000"));
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "filled", expect.stringContaining("BUY 0.002 BTC-USD at $50000 ($100), fee $0.60"));
+  });
+
+  it("rejects a fill too large for the size column with a readable error before inserting", async () => {
+    m.getLimits.mockResolvedValue({ ...limits, maxPositionUsd: 10_000_000 });
+    m.getMarketSnapshot.mockImplementation(async (productId: string) => ({
+      candles: [],
+      ticker: { productId, price: 0.00001, bestBid: 0.00001, bestAsk: 0.00001, tradeTime: Date.now() },
+      fetchedAt: Date.now()
+    }));
+    m.getReferencePrices.mockResolvedValue({ "BONK-USD": 0.00001 });
+
+    await expect(placePaperOrder(USER, { productId: "BONK-USD", side: "BUY", quoteUsd: 1_000_000 })).rejects.toThrow(
+      "This order is too large to record: 100,000,000,000 BONK is more than Kairis can store. Use a smaller order."
+    );
+    expect(m.insertPaperTrade).not.toHaveBeenCalled();
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "rejected", expect.stringContaining("too large to record"));
   });
 
   it("realizes P&L on a sell against the average cost of earlier paper fills", async () => {
@@ -96,6 +112,7 @@ describe("placePaperOrder", () => {
         baseSize: 0.01,
         price: 40000,
         quoteUsd: 400,
+        feeUsd: null,
         status: "filled",
         realizedPnlUsd: 0,
         note: "",
@@ -109,6 +126,8 @@ describe("placePaperOrder", () => {
 
     expect(decision.outcome).toBe("approved");
     expect(trade.baseSize).toBeCloseTo(0.005, 12);
-    expect(trade.realizedPnlUsd).toBeCloseTo(50, 8);
+    // The legacy buy carries no fee; the sell pays 0.6% of $250: 250 - 1.50 - 200 = 48.50.
+    expect(trade.feeUsd).toBeCloseTo(1.5, 8);
+    expect(trade.realizedPnlUsd).toBeCloseTo(48.5, 8);
   });
 });

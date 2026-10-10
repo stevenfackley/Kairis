@@ -159,7 +159,7 @@ describe.skipIf(!enabled)("repos", () => {
     expect(await getSignal(newestEth.id)).toEqual(newestEth);
   });
 
-  it("insertPaperTrade + listPaperTrades map side, numbers and legacy planned rows", async () => {
+  it("insertPaperTrade + listPaperTrades map side, numbers, fees and legacy planned rows", async () => {
     const base: PaperTrade = {
       id: "",
       userId: USER,
@@ -168,6 +168,7 @@ describe.skipIf(!enabled)("repos", () => {
       baseSize: 0.0123,
       price: 60000.5,
       quoteUsd: 738.01,
+      feeUsd: 4.42806369,
       status: "filled",
       realizedPnlUsd: 0,
       note: "entry",
@@ -177,7 +178,8 @@ describe.skipIf(!enabled)("repos", () => {
     };
     const buy = await insertPaperTrade(base);
     expect(buy.id).toMatch(/^[0-9a-f-]{36}$/);
-    await insertPaperTrade({ ...base, side: "SELL", price: 61000, quoteUsd: 750.3, realizedPnlUsd: 12.29, note: "exit", createdAt: "2026-10-09T11:00:00.000Z" });
+    expect(buy.feeUsd).toBe(4.42806369);
+    await insertPaperTrade({ ...base, side: "SELL", price: 61000, quoteUsd: 750.3, feeUsd: 4.5018, realizedPnlUsd: 12.29, note: "exit", createdAt: "2026-10-09T11:00:00.000Z" });
     await query(
       "insert into paper_trades (user_id, symbol, side, quantity, entry_price, status, created_at) values ($1, 'ETH-USD', 'buy', 1, 2000, 'planned', '2026-10-09T09:00:00Z')",
       [USER]
@@ -189,8 +191,8 @@ describe.skipIf(!enabled)("repos", () => {
       ["BUY", "filled", "entry"],
       ["BUY", "blocked", ""]
     ]);
-    expect(trades[0]).toMatchObject({ productId: "BTC-USD", baseSize: 0.0123, price: 61000, quoteUsd: 750.3, realizedPnlUsd: 12.29, riskDecision: decision });
-    expect(trades[2]).toMatchObject({ productId: "ETH-USD", quoteUsd: 0, riskDecision: null });
+    expect(trades[0]).toMatchObject({ productId: "BTC-USD", baseSize: 0.0123, price: 61000, quoteUsd: 750.3, feeUsd: 4.5018, realizedPnlUsd: 12.29, riskDecision: decision });
+    expect(trades[2]).toMatchObject({ productId: "ETH-USD", quoteUsd: 0, feeUsd: null, riskDecision: null });
     expect(await listPaperTrades(USER, 1)).toHaveLength(1);
   });
 

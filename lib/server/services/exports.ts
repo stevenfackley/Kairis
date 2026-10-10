@@ -18,6 +18,7 @@ const PAPER_COLUMNS = [
   "baseSize",
   "price",
   "quoteUsd",
+  "feeUsd",
   "status",
   "realizedPnlUsd",
   "signalId",

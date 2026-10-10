@@ -1,4 +1,4 @@
-import { buildPositions, dayStats, fillPaperOrder } from "@/lib/domain/paper";
+import { applyFill, buildPositions, dayStats, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
 import { evaluateRisk } from "@/lib/domain/risk";
 import { STRATEGY } from "@/lib/domain/strategy";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
@@ -6,9 +6,7 @@ import { appendAudit } from "@/lib/server/repos/audit";
 import { getLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
 import { getMarketSnapshot, getReferencePrices, marketDataAgeMs, type MarketSnapshot } from "@/lib/server/services/market";
-import type { AssistedOrder, OrderIntent, RiskContext, RiskDecision, Side, TradeMode } from "@/lib/types";
-
-type Fill = { productId: string; side: Side; baseSize: number; price: number; realizedPnlUsd: number; createdAt: string; status: "filled" };
+import type { AssistedOrder, OrderIntent, RiskContext, RiskDecision, TradeMode } from "@/lib/types";
 
 // Positions and day stats are rebuilt from the full history; the list repos default to small pages.
 export const HISTORY_LIMIT = 100_000;
@@ -41,15 +39,14 @@ function liveExposure(order: AssistedOrder): boolean {
 // Fees are left out of realized P&L: charging them to buys would count every entry as a loss.
 function liveFills(exposure: AssistedOrder[], prices: Record<string, number>): Fill[] {
   const fills: Fill[] = [];
+  const lots: Record<string, Lot> = {};
   for (const order of sortByTime(exposure)) {
     const price = order.averagePrice ?? prices[order.productId] ?? 0;
     const baseSize = order.filledSize ?? (price > 0 ? order.quoteUsd / price : 0);
-    let realizedPnlUsd = 0;
-    if (order.side === "SELL" && price > 0 && baseSize > 0) {
-      const held = buildPositions(fills, {});
-      realizedPnlUsd = fillPaperOrder(held, { productId: order.productId, side: "SELL", quoteUsd: baseSize * price, mode: "live" }, price).realizedPnlUsd;
-    }
-    fills.push({ productId: order.productId, side: order.side, baseSize, price, realizedPnlUsd, createdAt: order.createdAt, status: "filled" });
+    const realizedPnlUsd = order.side === "SELL" && price > 0 && baseSize > 0 ? realizeSell(lots[order.productId], baseSize, price, 0) : 0;
+    const fill: Fill = { productId: order.productId, side: order.side, baseSize, price, realizedPnlUsd, createdAt: order.createdAt, status: "filled" };
+    applyFill(lots, fill);
+    fills.push(fill);
   }
   return fills;
 }
@@ -59,7 +56,16 @@ async function historyFills(userId: string, mode: TradeMode, productId: string):
     const trades = await listPaperTrades(userId, HISTORY_LIMIT);
     const fills: Fill[] = trades
       .filter((t) => t.status === "filled")
-      .map((t): Fill => ({ productId: t.productId, side: t.side, baseSize: t.baseSize, price: t.price, realizedPnlUsd: t.realizedPnlUsd, createdAt: t.createdAt, status: "filled" }));
+      .map((t): Fill => ({
+        productId: t.productId,
+        side: t.side,
+        baseSize: t.baseSize,
+        price: t.price,
+        feeUsd: t.feeUsd,
+        realizedPnlUsd: t.realizedPnlUsd,
+        createdAt: t.createdAt,
+        status: "filled"
+      }));
     const held = Object.keys(buildPositions(fills, {}));
     return { fills, prices: await getReferencePrices([...held, productId]) };
   }

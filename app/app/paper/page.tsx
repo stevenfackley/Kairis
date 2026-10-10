@@ -6,7 +6,7 @@ import { PaperTicket } from "@/components/paper-ticket";
 import { PositionsTable } from "@/components/positions-table";
 import { isUuid, MAX_TICKET_USD, normalizeProductId } from "@/lib/domain/order-form";
 import { buildPositions, dayStats } from "@/lib/domain/paper";
-import { WATCHLIST } from "@/lib/domain/strategy";
+import { PAPER_TAKER_FEE_RATE, WATCHLIST } from "@/lib/domain/strategy";
 import { num, usd, when } from "@/lib/format";
 import { getLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
@@ -68,6 +68,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
   const today = dayStats(trades, now);
   const cooldown = cooldownUntil(today, limits, now);
   const journal = trades.slice(0, JOURNAL_ROWS);
+  const feePct = +(PAPER_TAKER_FEE_RATE * 100).toFixed(2);
 
   return (
     <div className="paper-page" data-mode="paper">
@@ -77,7 +78,10 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
           <ModeBadge mode="paper" />
         </div>
         <h1>Paper trading</h1>
-        <p className="lede">Simulated fills at the current Coinbase price. Same risk engine as live. No money moves.</p>
+        <p className="lede">
+          Simulated fills at the current Coinbase price, each charged a {feePct}% taker fee like a live market order. Same
+          risk engine as live. No money moves.
+        </p>
       </header>
 
       <section className="panel" aria-labelledby="paper-today">
@@ -89,18 +93,18 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
         </div>
         <div className="stat-grid">
           <div className="stat">
-            <span className="stat-label">Trades today</span>
+            <span className="stat-label">Trades today (UTC)</span>
             <span className="stat-value">
               {today.tradesCount} of {limits.maxTradesPerDay}
             </span>
           </div>
           <div className="stat">
-            <span className="stat-label">Realized P&amp;L today</span>
+            <span className="stat-label">Realized P&amp;L today (UTC)</span>
             <span className="stat-value">{signedUsd(today.realizedPnlUsd)}</span>
-            <span className="field-help">Loss cap {usd(limits.dailyLossCapUsd)}</span>
+            <span className="field-help">Closed trades only, net of fees. Loss cap {usd(limits.dailyLossCapUsd)}.</span>
           </div>
           <div className="stat">
-            <span className="stat-label">Consecutive losses</span>
+            <span className="stat-label">Consecutive losses today (UTC)</span>
             <span className="stat-value">
               {today.consecutiveLosses} of {limits.lossStreakTrigger}
             </span>
@@ -129,6 +133,9 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
       <section className="panel" aria-labelledby="paper-positions">
         <h2 id="paper-positions">Positions</h2>
         <PositionsTable positions={positions} prices={prices} />
+        <p className="field-help">
+          Average cost includes the {feePct}% buy fee. Unrealized P&amp;L is before the fee a sell would pay.
+        </p>
       </section>
 
       <section className="panel" aria-labelledby="paper-journal">
@@ -153,6 +160,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
                   <th scope="col" className="num">Size</th>
                   <th scope="col" className="num">Price</th>
                   <th scope="col" className="num">Quote</th>
+                  <th scope="col" className="num">Fee</th>
                   <th scope="col" className="num">Realized P&amp;L</th>
                   <th scope="col">Status</th>
                   <th scope="col">Note</th>
@@ -171,6 +179,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
                       <td className="num">{filled ? num(trade.baseSize, 8) : "n/a"}</td>
                       <td className="num">{trade.price > 0 ? usd(trade.price) : "n/a"}</td>
                       <td className="num">{usd(trade.quoteUsd)}</td>
+                      <td className="num">{filled ? usd(trade.feeUsd ?? 0) : "n/a"}</td>
                       <td className="num">{filled ? signedUsd(trade.realizedPnlUsd) : "n/a"}</td>
                       <td>
                         <span className={pill.className}>{pill.label}</span>
@@ -184,9 +193,10 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
                 })}
               </tbody>
             </table>
-            {trades.length > JOURNAL_ROWS ? (
-              <p className="field-help">Showing the latest {JOURNAL_ROWS} of {trades.length} paper orders.</p>
-            ) : null}
+            <p className="field-help">
+              Realized P&amp;L on a sell is net of both fees: the buy fee through the average cost, and the sell fee.
+              {trades.length > JOURNAL_ROWS ? ` Showing the latest ${JOURNAL_ROWS} of ${trades.length} paper orders.` : ""}
+            </p>
           </div>
         )}
       </section>

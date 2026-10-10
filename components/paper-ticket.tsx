@@ -17,8 +17,9 @@ type Result = NonNullable<PaperTicketState["result"]>;
 function resultLine({ trade, decision }: Result): string {
   if (trade.status === "filled") {
     const verb = trade.side === "BUY" ? "bought" : "sold";
-    const pnl = trade.side === "SELL" ? ` Realized ${usd(trade.realizedPnlUsd)}.` : "";
-    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usd(trade.price)}.${pnl}`;
+    const fee = ` Fee ${usd(trade.feeUsd ?? 0)}.`;
+    const pnl = trade.side === "SELL" ? ` Realized ${usd(trade.realizedPnlUsd)} after fees.` : "";
+    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usd(trade.price)}.${fee}${pnl}`;
   }
   const label = decision.outcome === "halted" ? "Halted" : "Blocked";
   return `${label}: ${decision.reasons[0] ?? "a risk check failed."} Nothing was filled; the attempt is in your journal.`;
