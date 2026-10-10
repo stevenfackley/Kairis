@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   insertAssistedOrder: vi.fn(),
   listPendingAssistedOrders: vi.fn(),
   listAssistedOrders: vi.fn(),
+  expireStalePreviews: vi.fn(),
   listPaperTrades: vi.fn(),
   getLimits: vi.fn(),
   appendAudit: vi.fn(),
@@ -38,7 +39,8 @@ vi.mock("@/lib/server/repos/assisted", () => ({
   updateAssistedOrder: m.updateAssistedOrder,
   insertAssistedOrder: m.insertAssistedOrder,
   listPendingAssistedOrders: m.listPendingAssistedOrders,
-  listAssistedOrders: m.listAssistedOrders
+  listAssistedOrders: m.listAssistedOrders,
+  expireStalePreviews: m.expireStalePreviews
 }));
 vi.mock("@/lib/server/repos/paper", () => ({ listPaperTrades: m.listPaperTrades }));
 vi.mock("@/lib/server/repos/limits", () => ({ getLimits: m.getLimits }));
@@ -146,6 +148,7 @@ beforeEach(() => {
   m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
   m.getReferencePrice.mockResolvedValue(PRICE);
   m.getProductRules.mockResolvedValue(BTC_RULES);
+  m.expireStalePreviews.mockResolvedValue(0);
   m.getAssistedOrder.mockImplementation(async () => current);
   m.claimPreviewedOrder.mockImplementation(async () => {
     if (current.status !== "previewed" || claimed) {
@@ -629,6 +632,23 @@ describe("reconcileAssisted", () => {
     // An unrecognised status stays queued for the next pass instead of dropping out as an error.
     expect(patchFor("id-o-unknown")).toEqual({ exchangeStatus: "WEIRD", detail: "Coinbase reported status WEIRD; reconcile again shortly." });
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "operations", "reconcile-assisted-orders", "Checked 6, updated 4.");
+  });
+
+  it("expires previews abandoned for more than 2 minutes on every reconcile and preview", async () => {
+    const { reconcileAssisted, previewAssisted } = await load(true);
+    m.listPendingAssistedOrders.mockResolvedValue([]);
+    m.expireStalePreviews.mockResolvedValue(2);
+
+    await reconcileAssisted(USER);
+    const [userId, cutoff, detail] = m.expireStalePreviews.mock.calls[0]!;
+    expect(userId).toBe(USER);
+    expect(Date.now() - Date.parse(cutoff as string)).toBeGreaterThanOrEqual(120_000);
+    expect(detail).toBe("Preview expired after 2 minutes without a submit; nothing was sent.");
+
+    m.insertAssistedOrder.mockImplementation(async (o: AssistedOrder) => ({ ...o, id: ORDER_ID }));
+    m.getExchangeClient.mockResolvedValue(createMockClient(async () => PRICE, () => "mock-x", async () => BTC_RULES));
+    await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+    expect(m.expireStalePreviews).toHaveBeenCalledTimes(2);
   });
 
   it("finds an unconfirmed order by client order id, and gives up after 10 minutes without a trace", async () => {

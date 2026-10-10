@@ -7,6 +7,7 @@ import type { ExchangeClient, OrderPreview, OrderStatus, OrderSubmitResult } fro
 import { num, usd } from "@/lib/format";
 import {
   claimPreviewedOrder,
+  expireStalePreviews,
   getAssistedOrder,
   insertAssistedOrder,
   listPendingAssistedOrders,
@@ -23,6 +24,7 @@ import type { AssistedOrder, OrderIntent, RiskDecision } from "@/lib/types";
 
 export const PREVIEW_TTL_MS = 120_000;
 const EXPIRED_DETAIL = "Preview expired after 2 minutes; preview again.";
+const ABANDONED_DETAIL = "Preview expired after 2 minutes without a submit; nothing was sent.";
 const LIVE_DISABLED_DETAIL = "Live assisted trading is disabled by environment policy (ENABLE_LIVE_ASSISTED_TRADING=false).";
 const PROVIDER_CHANGED_DETAIL = "The exchange connection changed since this preview; preview again.";
 const NO_SIZE_DETAIL = "This preview has no recorded order size; preview again.";
@@ -75,6 +77,11 @@ async function availableBase(client: ExchangeClient, currency: string): Promise<
 
 const floorCents = (n: number) => Math.floor(n * 100) / 100;
 
+/** A preview left behind (the user navigated away) would otherwise stay "previewed" forever. */
+async function expireAbandoned(userId: string): Promise<void> {
+  await expireStalePreviews(userId, new Date(Date.now() - PREVIEW_TTL_MS).toISOString(), ABANDONED_DETAIL);
+}
+
 /** closePosition sells the whole recorded position by coin amount; quoteUsd is then ignored. */
 export type AssistedPreviewIntent = Omit<OrderIntent, "mode"> & { closePosition?: boolean };
 
@@ -82,6 +89,7 @@ export async function previewAssisted(
   userId: string,
   intent: AssistedPreviewIntent
 ): Promise<{ decision: RiskDecision; order: AssistedOrder; preview: OrderPreview | null }> {
+  await expireAbandoned(userId);
   // Closing a position: the size is the held coins; the dollar figure (rounded down to the cent, so it
   // never exceeds the position) only feeds the risk checks and the record.
   let closeBase: number | null = null;
@@ -444,6 +452,7 @@ function reconcilePatch(order: Pick<AssistedOrder, "productId">, status: OrderSt
 }
 
 export async function reconcileAssisted(userId: string): Promise<{ checked: number; updated: number }> {
+  await expireAbandoned(userId);
   const pending = await listPendingAssistedOrders(userId);
   const clients = new Map<AssistedOrder["provider"], Promise<ExchangeClient>>();
   const clientFor = (provider: AssistedOrder["provider"]): Promise<ExchangeClient> => {
