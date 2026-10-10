@@ -119,6 +119,43 @@ describe("placePaperOrder", () => {
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "rejected", expect.stringContaining("too large to record"));
   });
 
+  it("sells the entire held position exactly, sized at the current price, leaving no dust", async () => {
+    m.listPaperTrades.mockResolvedValue([
+      {
+        id: "t0",
+        userId: USER,
+        productId: "BTC-USD",
+        side: "BUY",
+        baseSize: 0.00123457,
+        price: 40000,
+        quoteUsd: 49.38,
+        feeUsd: 0.29628,
+        status: "filled",
+        realizedPnlUsd: 0,
+        note: "",
+        signalId: null,
+        riskDecision: null,
+        createdAt: "2026-10-01T10:00:00.000Z"
+      }
+    ] satisfies PaperTrade[]);
+
+    const { trade, decision } = await placePaperOrder(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+
+    expect(decision.outcome).toBe("approved");
+    expect(trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.00123457, quoteUsd: 61.73 });
+    // 0.00123457 * 50000 = 61.7285 proceeds; fee 0.6% = 0.370371; cost 49.3828 + 0.29628 = 49.67908.
+    expect(trade.feeUsd).toBeCloseTo(0.370371, 8);
+    expect(trade.realizedPnlUsd).toBeCloseTo(61.7285 - 0.370371 - 49.67908, 6);
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "risk", "approved", expect.stringContaining("paper SELL BTC-USD $61.73 (entire position)"));
+  });
+
+  it("blocks selling an entire position that does not exist", async () => {
+    const { trade, decision } = await placePaperOrder(USER, { productId: "ETH-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+    expect(decision.outcome).toBe("blocked");
+    expect(decision.reasons).toEqual(["There is no position in ETH-USD to sell."]);
+    expect(trade.status).toBe("blocked");
+  });
+
   it("realizes P&L on a sell against the average cost of earlier paper fills", async () => {
     m.listPaperTrades.mockResolvedValue([
       {

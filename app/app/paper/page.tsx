@@ -64,6 +64,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
   const held = Object.keys(buildPositions(trades, {}));
   const prices = held.length > 0 ? await getReferencePrices(held) : {};
   const positions = buildPositions(trades, prices);
+  const holdings = Object.fromEntries(Object.entries(positions).map(([productId, p]) => [productId, p.baseSize]));
   const now = new Date();
   const today = dayStats(trades, now);
   const cooldown = cooldownUntil(today, limits, now);
@@ -127,6 +128,7 @@ export default async function PaperPage({ searchParams }: { searchParams: Search
           key={`${defaults.productId ?? ""}|${defaults.quoteUsd ?? ""}|${defaults.signalId ?? ""}`}
           defaults={defaults}
           watchlist={WATCHLIST}
+          holdings={holdings}
         />
       </section>
 

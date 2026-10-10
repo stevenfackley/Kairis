@@ -113,6 +113,19 @@ describe.skipIf(!enabled)("services", () => {
     expect(context.today.tradesCount).toBe(1);
   });
 
+  it("sells an entire paper position exactly, net of both fees, and leaves it flat", async () => {
+    await placePaperOrder(USER, { productId: "SOL-USD", side: "BUY", quoteUsd: 33.33 });
+    const closed = await placePaperOrder(USER, { productId: "SOL-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+
+    expect(closed.decision.outcome).toBe("approved");
+    expect(closed.trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.3333, quoteUsd: 33.33 });
+    // Flat at the same price: both 0.6% fees are lost, 2 x 0.19998 = 0.39996, stored to the cent.
+    expect(closed.trade.realizedPnlUsd).toBe(-0.4);
+    const context = await buildRiskContext(USER, "paper", "SOL-USD");
+    expect(context.positions["SOL-USD"]).toBeUndefined();
+    expect(context.today).toMatchObject({ tradesCount: 2, consecutiveLosses: 1 });
+  });
+
   it("previews and submits through the mock provider, then reconcile marks the order filled", async () => {
     const { decision, order, preview } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
     expect(decision.outcome).toBe("approved");

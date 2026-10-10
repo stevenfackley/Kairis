@@ -43,10 +43,11 @@ export function evaluateRisk(ctx: RiskContext, intent: OrderIntent): RiskDecisio
   if (unknown) add("tradable-product", false, `${intent.productId} is not a tradable Coinbase pair.`, "block");
 
   const valid = Number.isFinite(intent.quoteUsd) && intent.quoteUsd > 0;
-  add("valid-size", valid, valid ? `Order size ${usd(intent.quoteUsd)}.` : "Order size must be a positive dollar amount.", "block");
-
   const held = ctx.positions[intent.productId];
   const heldNotional = held && !isFlat(held.baseSize) && priceOk ? held.baseSize * ctx.referencePrice : 0;
+  // A sell with nothing held is explained by position-available; a $0 size is just a symptom of that.
+  const nothingToSell = intent.side === "SELL" && heldNotional === 0;
+  add("valid-size", valid || nothingToSell, valid ? `Order size ${usd(intent.quoteUsd)}.` : nothingToSell ? "No position to size." : "Order size must be a positive dollar amount.", "block");
   if (intent.side === "BUY") {
     const after = heldNotional + intent.quoteUsd;
     const max = ctx.limits.maxPositionUsd;

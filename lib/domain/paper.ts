@@ -68,13 +68,15 @@ export function realizeSell(held: Lot | undefined, size: number, price: number, 
 
 /**
  * Simulated taker fill at the reference price. The fee is `feeRate` of the filled notional. A sell is
- * capped at the held size, and closes the whole position when only dust would remain.
+ * capped at the held size, and closes the whole position when only dust would remain or when
+ * `closePosition` asks for exactly that.
  */
 export function fillPaperOrder(
   positions: Record<string, Position | undefined>,
   intent: OrderIntent,
   referencePrice: number,
-  feeRate: number = PAPER_TAKER_FEE_RATE
+  feeRate: number = PAPER_TAKER_FEE_RATE,
+  opts: { closePosition?: boolean } = {}
 ): { baseSize: number; price: number; feeUsd: number; realizedPnlUsd: number } {
   const price = round8(referencePrice);
   const requested = price > 0 ? round8(intent.quoteUsd / price) : 0;
@@ -84,7 +86,7 @@ export function fillPaperOrder(
   const held = positions[intent.productId];
   const heldSize = held && !isFlat(held.baseSize) ? held.baseSize : 0;
   let size = Math.min(requested, heldSize);
-  if (isFlat(heldSize - size)) size = heldSize;
+  if (opts.closePosition || isFlat(heldSize - size)) size = heldSize;
   const feeUsd = round8(size * price * feeRate);
   return { baseSize: size, price, feeUsd, realizedPnlUsd: realizeSell(held, size, price, feeUsd) };
 }

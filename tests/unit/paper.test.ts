@@ -93,6 +93,14 @@ describe("fillPaperOrder", () => {
     expect(f.baseSize).toBe(0.00163306); // 100 / 61234.56789123 = 0.0016330645...
     expect(f.feeUsd).toBe(Math.round(f.baseSize * f.price * 0.006 * 1e8) / 1e8);
   });
+  it("closes the exact held size when asked to, whatever the dollar size rounds to", () => {
+    const held = { "BTC-USD": { baseSize: 0.12345678, avgCost: 100, notionalUsd: 0 } };
+    // $12.35 at $100 asks for 0.1235, more than held; $12.34 asks for 0.1234, less than held.
+    for (const quoteUsd of [12.35, 12.34]) {
+      const f = fillPaperOrder(held, { productId: "BTC-USD", side: "SELL", quoteUsd, mode: "paper" }, 100, PAPER_TAKER_FEE_RATE, { closePosition: true });
+      expect(f.baseSize).toBe(0.12345678);
+    }
+  });
   it("realizes nothing on a sell without a position", () => {
     expect(fillPaperOrder({}, { productId: "BTC-USD", side: "SELL", quoteUsd: 10, mode: "paper" }, 100)).toEqual({ baseSize: 0, price: 100, feeUsd: 0, realizedPnlUsd: 0 });
   });

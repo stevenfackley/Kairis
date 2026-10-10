@@ -1,4 +1,4 @@
-import { applyFill, buildPositions, dayStats, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
+import { applyFill, buildPositions, dayStats, isFlat, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
 import { evaluateRisk } from "@/lib/domain/risk";
 import { STRATEGY } from "@/lib/domain/strategy";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
@@ -102,14 +102,31 @@ export async function buildRiskContext(userId: string, mode: TradeMode, productI
   };
 }
 
-export async function checkOrder(userId: string, intent: OrderIntent): Promise<{ decision: RiskDecision; context: RiskContext }> {
+/** The whole held position at the reference price, in cents (the risk check allows the one-cent round-up). */
+function closeQuoteUsd(context: RiskContext, productId: string): number {
+  const held = context.positions[productId];
+  if (!held || isFlat(held.baseSize) || !(context.referencePrice > 0)) return 0;
+  return Math.round(held.baseSize * context.referencePrice * 100) / 100;
+}
+
+/**
+ * Builds the risk context, evaluates the order and audits the decision. With `closePosition` the order
+ * sells the whole held position: its dollar size is set from the position at the current price, and the
+ * returned `intent` carries that size.
+ */
+export async function checkOrder(
+  userId: string,
+  intent: OrderIntent,
+  opts: { closePosition?: boolean } = {}
+): Promise<{ decision: RiskDecision; context: RiskContext; intent: OrderIntent }> {
   const context = await buildRiskContext(userId, intent.mode, intent.productId);
-  const decision = evaluateRisk(context, intent);
+  const resolved: OrderIntent = opts.closePosition ? { ...intent, side: "SELL", quoteUsd: closeQuoteUsd(context, intent.productId) } : intent;
+  const decision = evaluateRisk(context, resolved);
   await appendAudit(
     userId,
     "risk",
     decision.outcome,
-    `${intent.mode} ${intent.side} ${intent.productId} $${intent.quoteUsd}: ${decision.reasons.join(" ") || "approved"}`
+    `${resolved.mode} ${resolved.side} ${resolved.productId} $${resolved.quoteUsd}${opts.closePosition ? " (entire position)" : ""}: ${decision.reasons.join(" ") || "approved"}`
   );
-  return { decision, context };
+  return { decision, context, intent: resolved };
 }
