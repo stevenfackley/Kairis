@@ -19,11 +19,14 @@ deploy time. It never goes through GitHub secrets. See [infra/README.md](../infr
 
 ## One-time owner steps
 
-Status 2026-10-10: realms `kairis` and `kairis-dev` are live on the hosted Keycloak with
-self-registration and an `owner` realm role (qavren-auth PR #178); the Google broker redirect URIs
-still need adding to the shared Google OAuth client. GitHub variables and the app secrets are set
-(step d). Still open: step b (rotate the qavren-db role password and set the two database secrets),
-step c (`terraform apply`), the Google URIs, and the release tag.
+Status 2026-10-10: all steps below are done and `20261010_v1_Release` is live at
+`https://kairis.qavrensolutions.com` (`/api/system/status`: database connected, R2 and secret key
+configured). Realms `kairis` and `kairis-dev` run on the hosted Keycloak with self-registration and
+an `owner` realm role (qavren-auth PR #178). The Google broker redirect URIs are on the OAuth client
+the hosted Keycloak uses, `884887387558-o14g…` ("qavren-auth"); the local `.env` names a different
+client (`…m8oj…`, "shared realms"), so check the hosted one first when Google returns
+`redirect_uri_mismatch`. The qavren-db role password was rotated and both database URLs are `Prod`
+secrets. Terraform state for `infra/` is local and gitignored. `KAIRIS_OWNER_EMAILS` is set.
 
 Run these in order. They need credentials an agent session does not hold. `<qavren-auth>` and
 `<qavren-db>` are your local checkouts of those repos.
