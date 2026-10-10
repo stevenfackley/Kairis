@@ -1,13 +1,26 @@
 export type ExecutionMode = "paper" | "manual" | "assisted" | "auto";
+export type TradeMode = "paper" | "live";
+export type Side = "BUY" | "SELL";
+export type ProductId = string;
 
-export type OnboardingState = {
-  userId: string;
-  preferredMode: ExecutionMode;
-  riskAcknowledged: boolean;
-  exchangeConnected: boolean;
-  completedAt: string | null;
-  updatedAt: string;
+export type Candle = { start: number; open: number; high: number; low: number; close: number; volume: number };
+export type Ticker = { productId: ProductId; price: number; bestBid: number; bestAsk: number; tradeTime: number };
+
+export type SignalAction = "long" | "observe" | "blocked";
+export type SignalEvaluation = {
+  productId: ProductId;
+  action: SignalAction;
+  setup: string;
+  rationale: string[];
+  strength: number;
+  referencePrice: number;
+  atrPct: number | null;
+  rsi: number | null;
+  spreadPct: number | null;
+  dataAgeMs: number;
+  evaluatedAt: string;
 };
+export type SignalRecord = SignalEvaluation & { id: string };
 
 export type TradingLimits = {
   userId: string;
@@ -15,85 +28,58 @@ export type TradingLimits = {
   dailyLossCapUsd: number;
   maxTradesPerDay: number;
   cooldownMinutes: number;
+  lossStreakTrigger: number;
+  perSymbolMaxUsd: Record<string, number>;
+  tradingPaused: boolean;
   updatedAt: string;
 };
 
-export type PaperTrade = {
-  id: string;
-  userId: string;
-  symbol: string;
-  side: "buy" | "sell";
-  quantity: number;
-  entryPrice: number;
-  status: "planned" | "filled" | "blocked";
-  note: string;
-  createdAt: string;
-};
+export type OrderIntent = { productId: ProductId; side: Side; quoteUsd: number; mode: TradeMode; signalId?: string | null };
 
-export type AuditEvent = {
-  id: string;
-  userId: string;
-  category:
-    | "onboarding"
-    | "limits"
-    | "paper-trade"
-    | "assisted-order"
-    | "operations"
-    | "export";
-  action: string;
-  detail: string;
-  createdAt: string;
-};
+export type RiskCheck = { code: string; passed: boolean; detail: string };
+export type RiskOutcome = "approved" | "blocked" | "halted";
+export type RiskDecision = { outcome: RiskOutcome; checks: RiskCheck[]; reasons: string[]; evaluatedAt: string };
 
-export type ExportArtifact = {
-  id: string;
-  userId: string;
-  type: "paper-journal";
-  storage: "r2" | "local";
-  location: string;
-  createdAt: string;
-};
+export type DayStats = { tradesCount: number; realizedPnlUsd: number; consecutiveLosses: number; lastLossAt: string | null };
+export type Position = { baseSize: number; avgCost: number; notionalUsd: number };
+export type PositionMap = Record<ProductId, Position>;
 
-export type AssistedOrderRequest = {
-  productId: string;
-  side: "BUY" | "SELL";
-  quoteSize: number;
-};
-
-export type AssistedOrderPreview = {
-  provider: "coinbase" | "mock";
-  productId: string;
-  side: "BUY" | "SELL";
-  quoteSize: number;
-  estimatedPrice: number;
-  orderTotal: number;
-  commissionTotal: number;
-  warnings: string[];
-  previewId: string;
-};
-
-export type AssistedOrderRecord = {
-  id: string;
-  productId: string;
-  side: "BUY" | "SELL";
-  quoteSize: number;
-  status: "previewed" | "submitted" | "blocked";
-  reconcileState: "pending" | "reconciled" | "error";
-  reconciledAt: string | null;
-  provider: "coinbase" | "mock";
-  detail: string;
-  createdAt: string;
-};
-
-export type Phase4Snapshot = {
-  onboarding: OnboardingState;
+export type RiskContext = {
   limits: TradingLimits;
-  paperTrades: PaperTrade[];
-  auditEvents: AuditEvent[];
-  exports: ExportArtifact[];
-  assistedOrders: AssistedOrderRecord[];
-  storage: {
-    provider: "postgres" | "local";
-    artifacts: "r2" | "local";
-  };
+  today: DayStats;
+  positions: PositionMap;
+  referencePrice: number;
+  dataAgeMs: number;
+  maxDataAgeMs: number;
+  providerDegraded: boolean;
+  now: Date;
 };
+
+export type PaperTradeStatus = "filled" | "blocked";
+export type PaperTrade = {
+  id: string; userId: string; productId: ProductId; side: Side; baseSize: number; price: number; quoteUsd: number;
+  status: PaperTradeStatus; realizedPnlUsd: number; note: string; signalId: string | null; riskDecision: RiskDecision | null; createdAt: string;
+};
+
+export type AssistedStatus = "previewed" | "submitted" | "blocked" | "filled" | "cancelled" | "failed" | "expired";
+export type ReconcileState = "pending" | "reconciled" | "error";
+export type AssistedOrder = {
+  id: string; userId: string; productId: ProductId; side: Side; quoteUsd: number; status: AssistedStatus; reconcileState: ReconcileState;
+  reconciledAt: string | null; provider: "coinbase" | "mock"; detail: string; orderId: string | null; clientOrderId: string | null;
+  previewId: string | null; exchangeStatus: string | null; filledSize: number | null; averagePrice: number | null; totalFees: number | null;
+  signalId: string | null; riskDecision: RiskDecision | null; createdAt: string; updatedAt: string;
+};
+
+export type AuditCategory = "auth" | "onboarding" | "limits" | "signal" | "risk" | "paper-trade" | "assisted-order" | "exchange" | "export" | "operations" | "auto";
+export type AuditEvent = { id: string; userId: string; category: AuditCategory; action: string; detail: string; createdAt: string };
+
+export type ExchangeConnection = {
+  userId: string; provider: "coinbase"; keyId: string; canView: boolean; canTrade: boolean; canTransfer: boolean;
+  portfolioUuid: string | null; validatedAt: string; createdAt: string;
+};
+
+export type ExportType = "paper-journal" | "assisted-orders" | "audit-log";
+export type ExportArtifact = { id: string; userId: string; type: ExportType; storage: "r2" | "local"; location: string; createdAt: string };
+
+export type UserRecord = { id: string; email: string | null; displayName: string | null; isOwner: boolean; createdAt: string; lastSeenAt: string };
+export type OnboardingState = { userId: string; preferredMode: ExecutionMode; riskAcknowledged: boolean; exchangeConnected: boolean; completedAt: string | null; updatedAt: string };

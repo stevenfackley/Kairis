@@ -14,5 +14,6 @@ jobs:
     uses: stevenfackley/gh-actions/.github/workflows/ci-node.yml@v1
     with:
       project-name: kairis
-      node-version: "22"
+      node-version: "26"
+      run-postgres: true
     secrets: inherit

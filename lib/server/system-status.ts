@@ -1,44 +1,32 @@
 import { env } from "@/lib/env";
-import { getDatabasePool } from "@/lib/server/database";
+import { pingDatabase } from "@/lib/server/db";
 
 export type SystemStatus = {
   app: string;
   appEnv: string;
-  exchangeProvider: string;
+  realm: string;
   liveAssistedTradingEnabled: boolean;
-  storage: {
-    persistence: "postgres" | "local";
-    artifacts: "r2" | "local";
-  };
+  autoModeEnabled: boolean;
   services: {
-    database: "configured" | "missing";
-    databaseProvider: string;
+    database: "connected" | "missing" | "error";
     r2: "configured" | "missing";
-    coinbase: "configured" | "missing";
+    secretKey: "configured" | "missing";
   };
 };
 
-export function getSystemStatus(): SystemStatus {
-  const database = getDatabasePool();
-
+// Readiness: pings the database (2 s timeout). Liveness (/api/health) must not call this.
+export async function getSystemStatus(): Promise<SystemStatus> {
+  const database = !env.databaseUrl ? "missing" : (await pingDatabase()) ? "connected" : "error";
   return {
     app: env.appName,
     appEnv: env.appEnv,
-    exchangeProvider: env.exchangeProvider,
-    liveAssistedTradingEnabled: env.assistedLiveTradingEnabled,
-    storage: {
-      persistence: database ? "postgres" : "local",
-      artifacts: env.r2Configured ? "r2" : "local"
-    },
+    realm: env.realm,
+    liveAssistedTradingEnabled: env.liveAssistedTradingEnabled,
+    autoModeEnabled: env.autoModeEnabled,
     services: {
-      database: env.databaseConfigured ? "configured" : "missing",
-      databaseProvider: env.databaseProvider,
+      database,
       r2: env.r2Configured ? "configured" : "missing",
-      coinbase:
-        Boolean(process.env.COINBASE_API_KEY_ID) &&
-        Boolean(process.env.COINBASE_API_KEY_SECRET)
-          ? "configured"
-          : "missing"
+      secretKey: env.secretKey ? "configured" : "missing"
     }
   };
 }

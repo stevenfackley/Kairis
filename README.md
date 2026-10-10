@@ -1,214 +1,135 @@
 # Kairis <sub>`>o)`</sub>
 
-Kairis is a documentation-first fintech project for a non-custodial crypto trading system built around disciplined execution, visible risk controls, and mode-based trading workflows.
-
-The repository starts with the business and product source of truth before any application scaffolding. The intent is to align brand, market, user experience, system boundaries, and launch strategy before code introduces avoidable drift.
+Kairis is a non-custodial crypto trading workspace built around disciplined execution: rule-based
+signals that explain themselves, a risk engine that checks every order against the user's own limits,
+paper trading, and assisted orders on the user's own Coinbase account that never go out without an
+explicit confirmation.
 
 ## License
 
-This repository is proprietary and is not open source.
+This repository is proprietary and is not open source. See [LICENSE](LICENSE) for the governing terms.
 
-See [LICENSE](LICENSE) for the governing terms.
+## What works today
 
-## What Kairis Is
+- **Sign in and sign up** through the `kairis` realm on qavren-auth (Keycloak, public PKCE client
+  `kairis-web`). Every row Kairis stores is keyed by the Keycloak `sub`.
+- **Onboarding**: scope explanation, a required risk acknowledgment, a preferred mode (paper, manual,
+  assisted). Everyone starts in paper.
+- **Signals**: BTC-USD, ETH-USD and SOL-USD on hourly Coinbase candles. An EMA 9/21 cross within the
+  last 3 candles, confirmed by RSI 14 between 45 and 70. Wide spreads (above 0.5 %), ATR spikes
+  (above 6 % of price) and stale data (ticker older than 5 minutes, candle older than 3 hours) block
+  or fail closed. Each signal carries its rationale and a suggested size (ATR 14 against 25 % of the
+  daily loss cap). Every evaluation is stored.
+- **Risk engine**: global pause (kill switch), fresh data, provider health, valid size, max position
+  after the fill, per-symbol caps, a sell needs a position, trades per day, daily loss cap, and a
+  cooldown after a loss streak. Outcomes are `approved`, `blocked` or `halted`, each with reasons.
+- **Paper trading**: simulated fills at the Coinbase reference price, positions, realized P&L, and a
+  journal that keeps blocked attempts with their reasons.
+- **Coinbase connection**: per-user Coinbase Developer Platform keys. Kairis reads the key's
+  permissions, rejects any key that can transfer funds, and stores the private key sealed with
+  AES-256-GCM under `KAIRIS_SECRET_KEY`.
+- **Assisted trades**: preview, explicit confirm, submit, reconcile. The order row id is sent as the
+  exchange `client_order_id`. Live submission is blocked unless `ENABLE_LIVE_ASSISTED_TRADING=true`.
+  Reconciliation reads order status back from Coinbase.
+- **Records**: a filterable journal of audit events and CSV exports (paper journal, assisted orders,
+  audit log) to Cloudflare R2, or local files when R2 is not configured.
+- **Owner operations**: system status, reconcile, and an auto cycle that runs only for owners and only
+  when `ENABLE_AUTO_MODE` and `ENABLE_LIVE_ASSISTED_TRADING` are both true. It opens long positions
+  on fresh signals and never sells.
 
-Kairis is intended to be a trader operating layer, not a broker and not a hype-driven trading bot. The product thesis is that most retail traders need better control over execution, not just more signals.
+Limits: Coinbase only, spot only. P&L and limits only see trades made through Kairis. Exports written
+to the container's local disk are lost on redeploy unless R2 is configured.
 
-Core product idea:
+Production is `https://kairis.qavrensolutions.com` on the shared Qavren hub. It goes live when the owner
+completes the one-time steps in [docs/deployment.md](docs/deployment.md). Live submission and auto mode
+ship disabled.
 
-- `Manual mode`: user reviews signals and submits trades directly
-- `Assisted mode`: system prepares trades and controls, user confirms execution
-- `Auto mode`: system may place trades under hard limits, initially internal only
+## Screens
 
-## Working Brand
+| Route | What it is |
+|---|---|
+| `/` | Landing page |
+| `/sign-in` | Sign in through the Keycloak realm |
+| `/app` | Dashboard with the kill switch |
+| `/app/onboarding` | Scope, risk acknowledgment, preferred mode |
+| `/app/signals` | Current signals with rationale |
+| `/app/paper` | Paper trading |
+| `/app/trade` | Assisted trade flow: preview, confirm, submit |
+| `/app/controls` | Trading limits and per-symbol caps |
+| `/app/journal` | Audit journal |
+| `/app/exchange` | Coinbase key connection |
+| `/app/reports` | CSV exports |
+| `/app/operations` | Owner only: status, reconcile, auto cycle |
 
-- Name: `Kairis`
-- Pronunciation: `KAI-riss`
-- Root: inspired by `kairos`, the opportune or right moment
-- Brand meaning: disciplined timing and controlled action
-- Brand stance: serious, calm, and control-oriented
+API: `/api/health` (liveness), `/api/system/status` (readiness: database, R2, secret key), `/api/auth/*`.
 
-## Selected Brand Direction
+## Local setup
 
-The selected initial logo direction is `Threshold K`.
+Prerequisites: Node (see `.nvmrc`), Docker Desktop.
 
-- Primary logo concept: [kairis-threshold-k.svg](assets/logos/kairis-threshold-k.svg)
-- Brand metaphor: a controlled threshold between signal and execution
-- Visual posture: dark, precise, calm, and instrument-like rather than loud or speculative
-- Primary palette:
-  - Obsidian: `#111315`
-  - Bone: `#E9E4D8`
-  - Sage Signal: `#708B7A`
-  - Brass Index: `#C8B27A`
+```bash
+npm ci
+npm run db:up                      # Postgres 17 on 127.0.0.1:55433 (compose.dev.yaml)
+cp .env.example .env.local
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # paste as AUTH_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # paste as KAIRIS_SECRET_KEY
+npm run db:migrate                 # applies db/migrations, tracked in schema_migrations
+npm run dev                        # http://localhost:3000
+```
 
-Alternative concepts remain in the repo for reference, but `Threshold K` is the current source-of-truth direction for branding work.
+Sign-in uses the `kairis-dev` realm on qavren-auth (`QAVREN_REALM=kairis-dev` in `.env.example`), which
+allows `http://localhost:3000/*` as a redirect URI. See [docs/identity.md](docs/identity.md).
 
-The secondary logo concepts are intentionally retained for internal module or subsystem branding:
+## Quality gates
 
-- `Aperture Mark`: candidate for reporting, analytics, or review-oriented modules
-- `Signal Gate`: candidate for execution, orchestration, or control-plane modules
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+pwsh scripts/scan-secrets.ps1
+```
 
-## Current Product Boundary
+The integration tests need a Postgres on localhost: run `npm run db:up` and set
+`DATABASE_URL=postgres://kairis:kairis@localhost:55433/kairis`.
 
-The current documented scope assumes:
+## Deploy
 
-- non-custodial product
-- centralized exchange integrations only
-- spot trading only
-- no pooled user funds
-- no withdrawal permissions on exchange API keys
-- public product starts with manual and assisted execution
-- internal owner mode may support full automation
+One image (`kairis-web`) in ECR, deployed over SSM to the shared hub behind a Cloudflare tunnel. A tag
+like `20261009_v1_Release` triggers `.github/workflows/deploy-prod.yml`: build and push, migrate the
+database, write the host `.env`, restart, wait for `/api/health`, smoke the public URL. Details in
+[docs/deployment.md](docs/deployment.md) and [infra/README.md](infra/README.md).
 
-Out of scope for the current version:
+## Source-of-truth decisions
 
-- brokerage or custody
-- DEX-first wallet automation
-- leverage, margin, or perpetuals
-- public unattended automation by default
-- copy trading or social trading layers
+- `Kairis` is the product name; beginner retail crypto traders are the first public audience.
+- Paper mode is the default starting experience. Public value is control and safer execution, not
+  profit promises.
+- Public unattended automation is not offered. The auto cycle is owner-only and env-gated.
+- Data lives in the `kairis` schema on qavren-db (shared Supabase Pro project, one schema and role per
+  app). Postgres is required; there is no JSON fallback.
+- Identity is a Keycloak realm per app on qavren-auth: `kairis` for production, `kairis-dev` for localhost.
+- Hosting is the shared Qavren hub behind a Cloudflare tunnel. No per-app server.
+- Cloudflare R2 holds exports when configured; local files otherwise.
+- GitHub Actions is the CI/CD system. AWS access is OIDC only.
 
-## Repository Purpose
+The ADR log is [DECISIONS.md](DECISIONS.md).
 
-This repository currently exists to:
+## Document map
 
-- define the working brand and business model
-- document the initial product requirements
-- define the user experience and system architecture
-- establish risk and compliance boundaries
-- align pricing, packaging, marketing, and go-to-market strategy
-- ship the early application shell, local test runtime, and managed-service integration paths
+- Strategy: [Brand + Business Brief](docs/brand-business-brief.md), [Business Plan](docs/business-plan.md)
+- Product and design: [PRD](docs/prd.md), [PDD](docs/pdd.md)
+- System and data: [SDD](docs/sdd.md), [Data Flow Diagram](docs/diagrams/data-flow-diagram.md),
+  [Database](docs/database.md), [Identity](docs/identity.md), [Deployment](docs/deployment.md)
+- Risk and commercialization: [Risk and Compliance Memo](docs/risk-compliance-memo.md),
+  [Pricing and Packaging](docs/pricing-packaging-brief.md), [Marketing Guide](docs/marketing-guide.md),
+  [Go-to-Market Plan](docs/go-to-market-launch-plan.md)
+- Brand assets: [Logo concepts](assets/logos/README.md), [Threshold K](assets/logos/kairis-threshold-k.svg)
+- Governance: [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), [DECISIONS](DECISIONS.md)
 
-## Document Map
+## Brand
 
-### Core Strategy
-
-- [Brand + Business Brief](docs/brand-business-brief.md)
-- [Business Plan](docs/business-plan.md)
-
-### Product And Design
-
-- [Product Requirements Document](docs/prd.md)
-- [Product Design Document](docs/pdd.md)
-
-### System And Data
-
-- [System Design Document](docs/sdd.md)
-- [Data Flow Diagram](docs/diagrams/data-flow-diagram.md)
-
-### Risk And Commercialization
-
-- [Risk and Compliance Memo](docs/risk-compliance-memo.md)
-- [Pricing and Packaging Brief](docs/pricing-packaging-brief.md)
-- [Marketing Guide](docs/marketing-guide.md)
-- [Go-to-Market Launch Plan](docs/go-to-market-launch-plan.md)
-
-### Brand Assets
-
-- [Logo Concepts](assets/logos/README.md)
-- [Selected Threshold K Logo](assets/logos/kairis-threshold-k.svg)
-
-### App Scaffold
-
-- [Next.js application shell](app/page.tsx)
-- [Health endpoint](app/api/health/route.ts)
-- [GitHub Actions CI](.github/workflows/ci.yml)
-- [Environment template](.env.example)
-- [Onboarding flow](app/onboarding/page.tsx)
-- [Paper trading workspace](app/paper/page.tsx)
-- [Exchange connection policy view](app/connect-exchange/page.tsx)
-- [Reports and export workspace](app/reports/page.tsx)
-- [Assisted live trading flow](app/assisted-live/page.tsx)
-- [Operations dashboard](app/operations/page.tsx)
-- [System status endpoint](app/api/system/status/route.ts)
-- [Deployment workflow scaffold](.github/workflows/deploy.yml)
-- [Proxmox test environment guide](docs/proxmox-test-environment.md)
-- [Managed Postgres setup guide](docs/supabase-setup.md)
-
-## Document Ordering
-
-The docs are meant to be read in this order:
-
-1. Brand + Business Brief
-2. Business Plan
-3. PRD
-4. PDD
-5. SDD
-6. Data Flow Diagram
-7. Risk and Compliance Memo
-8. Pricing and Packaging Brief
-9. Marketing Guide
-10. Go-to-Market Launch Plan
-
-## Source-Of-Truth Decisions
-
-These decisions should be treated as active defaults unless revised in the docs:
-
-- `Kairis` is the working product name
-- beginner retail crypto users are the initial public audience
-- paper mode is the safest default starting experience
-- public value is centered on control and safer execution, not promises of profit
-- public unattended automation is not part of the initial launch posture
-- `Supabase Postgres` is the default managed backend foundation
-- `Cloudflare R2` is the default object storage layer for exports and durable artifacts
-- local `Proxmox` will be used for test environments
-- only `AWS EC2` is assumed to be available from AWS, and it is the intended production hosting path
-- `GitHub Actions` is the default CI/CD system
-- the system should prefer managed services over AWS-first infrastructure in the initial phase
-- the application stack should remain light enough to run in local Proxmox-based test environments
-- the app should fall back cleanly to local JSON persistence when managed Postgres is not configured
-- export artifacts should use `Cloudflare R2` when configured and local storage otherwise
-
-## Suggested Repo Conventions
-
-As code is added later, preserve these conventions:
-
-- keep product and architecture decisions documented before major implementation changes
-- use repo Markdown as the source of truth, exporting to other formats only when needed
-- keep business-facing claims aligned with the risk/compliance memo
-- treat internal owner automation separately from public entitlement logic
-
-## Naming And Domain Notes
-
-The working brand is `Kairis`. The project does not require a `.com` during validation.
-
-Current preferred domain patterns:
-
-- `kairis.io`
-- `getkairis.com`
-- `kairisapp.com`
-- `kairis.trade`
-
-The repo name should stay aligned with the product name even if the public domain uses a prefix.
-
-## Current Runtime State
-
-The repository now contains:
-
-- a working Next.js application shell with branded landing and flow pages
-- local-first persistence with optional managed `Postgres` writes
-- export generation with optional `Cloudflare R2` uploads
-- a mock-safe assisted trading path and Coinbase integration surface
-- an operations dashboard and system-status endpoint for readiness checks
-- Docker-based Proxmox test deployment scaffolding
-- CI validation plus deploy workflow scaffolding
-
-## Next Step
-
-The next implementation phase should focus on:
-
-- wiring the active `Supabase` database settings into local, test, and GitHub deployment secrets
-- applying the repo SQL migrations to the active Supabase database
-- validating Docker deployment on the Proxmox host
-- wiring real Coinbase credentials only after the rest of the environment is stable
-
-## Local Workflow
-
-Local development and release flow should remain:
-
-1. work locally in the repo
-2. validate changes locally
-3. commit on the local branch
-4. push to GitHub
-
-Direct editing in GitHub should be avoided except for emergencies.
+Name `Kairis` (KAI-riss, from *kairos*, the right moment). Selected logo direction: Threshold K.
+Palette: Obsidian `#111315`, Bone `#E9E4D8`, Sage Signal `#708B7A` (paper mode accent), Brass Index
+`#C8B27A` (live mode accent). Non-custodial, centralized-exchange, spot only; no withdrawal permission
+on exchange keys.

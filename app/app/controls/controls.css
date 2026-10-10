@@ -1,0 +1,32 @@
+/* Controls page: limits form layout. Page-scoped by class name. */
+
+.limits-form {
+  display: grid;
+  gap: 20px;
+}
+
+.panel-copy + .limits-form {
+  margin-top: 16px;
+}
+
+.limits-cap-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.kill-switch .kill-switch-state {
+  margin: 0 0 12px;
+  font-family: var(--ui-font);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.kill-switch[data-paused="true"] .kill-switch-state {
+  color: var(--danger);
+}
+
+.kill-switch[data-paused="false"] .kill-switch-state {
+  color: var(--sage);
+}

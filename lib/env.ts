@@ -1,26 +1,15 @@
-const requiredPublicEnv = {
+import { parseOwnerEmails } from "@/lib/domain/owner";
+const bool = (v: string | undefined) => v === "true";
+export const env = {
   appName: process.env.NEXT_PUBLIC_APP_NAME ?? "Kairis",
   appEnv: process.env.NEXT_PUBLIC_APP_ENV ?? "development",
-  defaultMode: process.env.NEXT_PUBLIC_DEFAULT_MODE ?? "paper",
-  appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:3000"
-};
-
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  process.env.POSTGRES_URL ??
-  process.env.NEON_DATABASE_URL ??
-  "";
-
-export const env = {
-  ...requiredPublicEnv,
-  databaseUrl,
-  databaseProvider: process.env.DATABASE_PROVIDER ?? (databaseUrl ? "supabase" : "local"),
-  exchangeProvider: process.env.EXCHANGE_PROVIDER ?? "mock",
-  assistedLiveTradingEnabled: process.env.ENABLE_LIVE_ASSISTED_TRADING === "true",
-  databaseConfigured: databaseUrl.length > 0,
-  r2Configured:
-    Boolean(process.env.R2_ACCOUNT_ID) &&
-    Boolean(process.env.R2_ACCESS_KEY_ID) &&
-    Boolean(process.env.R2_SECRET_ACCESS_KEY) &&
-    Boolean(process.env.R2_BUCKET)
+  appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:3000",
+  realm: process.env.QAVREN_REALM ?? "kairis",
+  ownerEmails: parseOwnerEmails(process.env.KAIRIS_OWNER_EMAILS),
+  secretKey: process.env.KAIRIS_SECRET_KEY ?? "",
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  liveAssistedTradingEnabled: bool(process.env.ENABLE_LIVE_ASSISTED_TRADING),
+  autoModeEnabled: bool(process.env.ENABLE_AUTO_MODE),
+  r2Configured: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET),
+  localDataDir: process.env.LOCAL_DATA_DIR ?? ".local-data"
 };

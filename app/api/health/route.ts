@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSystemStatus } from "@/lib/server/system-status";
+import { env } from "@/lib/env";
 
+// Liveness only: no database or network calls here (the readiness report is /api/system/status).
 export function GET() {
-  const status = getSystemStatus();
-
   return NextResponse.json({
-    app: status.app,
+    app: env.appName,
     status: "ok",
-    appEnv: status.appEnv,
-    exchangeProvider: status.exchangeProvider,
-    storage: status.storage
+    appEnv: env.appEnv
   });
 }

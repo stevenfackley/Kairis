@@ -1,0 +1,9 @@
+# Terraform state, plans, secrets
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+!*.tfvars.example
+.terraform/
+crash.log

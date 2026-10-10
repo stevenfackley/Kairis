@@ -1,0 +1,8 @@
+aws_region                  = "us-east-1"
+cloudflare_api_token        = "REPLACE" # Zone:DNS:Edit + Zone:Zone:Read on qavrensolutions.com, Account:Cloudflare Tunnel:Edit
+cloudflare_account_id       = "REPLACE"
+cloudflare_zone_id          = "a83c311d1a6ea01bb750bc0a18ba7147" # qavrensolutions.com zone (same value as qavren-auth/infra)
+hostname                    = "kairis.qavrensolutions.com"
+cloudflare_zone_name        = "qavrensolutions.com"
+github_repo                 = "stevenfackley/Kairis"
+create_github_oidc_provider = false
