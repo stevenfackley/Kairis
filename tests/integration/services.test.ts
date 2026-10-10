@@ -24,7 +24,7 @@ import { listExports } from "@/lib/server/repos/exports";
 import { saveLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
 import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
-import { createExport } from "@/lib/server/services/exports";
+import { createExport, openExportDownload } from "@/lib/server/services/exports";
 import { __setMarketFetchers } from "@/lib/server/services/market";
 import { placePaperOrder } from "@/lib/server/services/paper";
 import { buildRiskContext } from "@/lib/server/services/risk";
@@ -171,5 +171,12 @@ describe.skipIf(!enabled)("services", () => {
     expect(lines[1]).toContain(",ETH-USD,BUY,0.25,100,25,0.15,filled,0,,\"has, a comma\"");
     expect(await listExports(USER)).toEqual([artifact]);
     expect(await listAudit(USER, { category: "export" })).toHaveLength(1);
+
+    const download = await openExportDownload(USER, artifact.id);
+    if (!download.ok) throw new Error(download.message);
+    expect(download.fileName).toBe(path.basename(artifact.location));
+    expect(await new Response(download.body).text()).toBe(await readFile(artifact.location, "utf8"));
+    expect(await openExportDownload("someone-else", artifact.id)).toMatchObject({ ok: false, status: 404 });
+    expect((await listAudit(USER, { category: "export" })).map((e) => e.action).sort()).toEqual(["created", "downloaded"]);
   });
 });

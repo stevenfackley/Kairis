@@ -32,7 +32,8 @@ This repository is proprietary and is not open source. See [LICENSE](LICENSE) fo
   exchange `client_order_id`. Live submission is blocked unless `ENABLE_LIVE_ASSISTED_TRADING=true`.
   Reconciliation reads order status back from Coinbase.
 - **Records**: a filterable journal of audit events and CSV exports (paper journal, assisted orders,
-  audit log) to Cloudflare R2, or local files when R2 is not configured.
+  audit log) to a private Cloudflare R2 bucket, or local files when R2 is not configured. Exports are
+  downloaded only through the signed-in `/app/reports/download/<id>` route.
 - **Owner operations**: system status, reconcile, and an auto cycle that runs only for owners and only
   when `ENABLE_AUTO_MODE` and `ENABLE_LIVE_ASSISTED_TRADING` are both true. It opens long positions
   on fresh signals and never sells.
