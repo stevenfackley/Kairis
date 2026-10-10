@@ -121,8 +121,7 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     }
     throw new Error(existing.status !== "previewed" ? "Only a previewed order can be submitted." : "This order is already being submitted.");
   }
-  let submitDecision: RiskDecision | undefined;
-  const block = async (detail: string) =>
+  const block = async (detail: string, riskDecision?: RiskDecision) =>
     record(
       userId,
       await updateAssistedOrder(order.id, {
@@ -130,7 +129,7 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
         reconcileState: "error",
         reconciledAt: new Date().toISOString(),
         detail,
-        riskDecision: submitDecision
+        riskDecision
       }),
       "blocked"
     );
@@ -154,17 +153,16 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     mode: "live",
     signalId: order.signalId
   });
-  submitDecision = decision;
   if (decision.outcome !== "approved") {
-    return block(decision.reasons.join(" "));
+    return block(decision.reasons.join(" "), decision);
   }
 
   const client = await getExchangeClient(userId);
   if (client.provider !== order.provider) {
-    return block(PROVIDER_CHANGED_DETAIL);
+    return block(PROVIDER_CHANGED_DETAIL, decision);
   }
   if (client.provider === "coinbase" && !env.liveAssistedTradingEnabled) {
-    return block(LIVE_DISABLED_DETAIL);
+    return block(LIVE_DISABLED_DETAIL, decision);
   }
 
   let result: OrderSubmitResult;
