@@ -1,6 +1,7 @@
 import { openSecret, sealSecret } from "@/lib/domain/crypto";
 import { env } from "@/lib/env";
 import { createCoinbaseClient } from "@/lib/exchange/coinbase";
+import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
 import { createMockClient } from "@/lib/exchange/mock";
@@ -113,7 +114,8 @@ export async function getConnectionStatus(userId: string): Promise<ExchangeConne
   };
 }
 
-// The user's Coinbase key when one is stored and the server can open it; otherwise the mock provider.
+// The user's Coinbase key when one is stored and the server can open it; otherwise the mock provider,
+// which enforces the same Coinbase product rules so mock users meet the same refusals.
 export async function getExchangeClient(userId: string): Promise<ExchangeClient> {
   const stored = await getConnection(userId);
   if (stored && env.secretKey) {
@@ -125,5 +127,5 @@ export async function getExchangeClient(userId: string): Promise<ExchangeClient>
     }
     return createCoinbaseClient({ keyId: stored.keyId, secret });
   }
-  return createMockClient(getReferencePrice);
+  return createMockClient(getReferencePrice, undefined, getProductRules);
 }

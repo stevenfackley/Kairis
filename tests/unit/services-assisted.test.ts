@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mapProduct } from "@/lib/exchange/coinbase-public";
 import { createMockClient } from "@/lib/exchange/mock";
-import type { ExchangeClient, OrderStatus } from "@/lib/exchange/types";
+import type { ExchangeClient, OrderPreview, OrderStatus, ProductRules } from "@/lib/exchange/types";
 import type { AssistedOrder, TradingLimits } from "@/lib/types";
 
 const m = vi.hoisted(() => ({
@@ -18,7 +21,13 @@ const m = vi.hoisted(() => ({
   getReferencePrices: vi.fn(),
   getReferencePrice: vi.fn(),
   getExchangeClient: vi.fn(),
-  getConnectionStatus: vi.fn()
+  getConnectionStatus: vi.fn(),
+  getProductRules: vi.fn()
+}));
+
+vi.mock("@/lib/exchange/coinbase-public", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/exchange/coinbase-public")>()),
+  getProductRules: m.getProductRules
 }));
 
 vi.mock("@/lib/server/repos/assisted", () => ({
@@ -48,6 +57,12 @@ const USER = "user-1";
 const PRICE = 50000;
 const ORDER_ID = "11111111-1111-4111-8111-111111111111";
 const LIVE_DISABLED = "Live assisted trading is disabled by environment policy (ENABLE_LIVE_ASSISTED_TRADING=false).";
+// GET /api/v3/brokerage/market/products/BTC-USD as captured on 2026-10-10.
+const BTC_RULES: ProductRules = mapProduct(JSON.parse(readFileSync(path.resolve(__dirname, "../fixtures/coinbase/product-btc-usd.json"), "utf8")));
+
+function cleanPreview(overrides: Partial<OrderPreview> = {}): OrderPreview {
+  return { previewId: "p1", orderTotal: 100, commissionTotal: 0.6, bestBid: PRICE - 1, bestAsk: PRICE + 1, baseSize: 0.002, quoteSize: 100, errors: [], warnings: [], ...overrides };
+}
 
 const limits: TradingLimits = {
   userId: USER,
@@ -83,6 +98,7 @@ function order(overrides: Partial<AssistedOrder> = {}): AssistedOrder {
     totalFees: null,
     signalId: null,
     riskDecision: null,
+    orderSize: { kind: "quote", quoteSize: "100" },
     createdAt: now,
     updatedAt: now,
     ...overrides
@@ -125,6 +141,7 @@ beforeEach(() => {
   }));
   m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
   m.getReferencePrice.mockResolvedValue(PRICE);
+  m.getProductRules.mockResolvedValue(BTC_RULES);
   m.getAssistedOrder.mockImplementation(async () => current);
   m.claimPreviewedOrder.mockImplementation(async () => {
     if (current.status !== "previewed" || claimed) {
@@ -172,14 +189,111 @@ describe("previewAssisted", () => {
 
   it("previews normally when the key can trade", async () => {
     const { previewAssisted } = await load(true);
-    const previewOrder = vi.fn(async () => ({ previewId: "p1", orderTotal: 100, commissionTotal: 0.6, bestBid: 1, bestAsk: 1, warnings: [] }));
+    const previewOrder = vi.fn(async () => cleanPreview());
     m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
     m.getConnectionStatus.mockResolvedValue({ canTrade: true });
 
     const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
 
-    expect(previewOrder).toHaveBeenCalledOnce();
-    expect(result.order.status).toBe("previewed");
+    expect(previewOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "100" } });
+    expect(result.order).toMatchObject({ status: "previewed", orderSize: { kind: "quote", quoteSize: "100" } });
+    expect(result.order.detail).toBe("Previewed: spend $100.00, order total $100.00 including $0.60 commission.");
+  });
+
+  describe("sells", () => {
+    // 0.01 BTC bought earlier through Kairis: a $500 position at the $50,000 mark.
+    beforeEach(() => {
+      m.listAssistedOrders.mockResolvedValue([
+        order({ id: "held-1", status: "filled", side: "BUY", quoteUsd: 500, filledSize: 0.01, averagePrice: PRICE, createdAt: "2026-10-09T10:00:00.000Z" })
+      ]);
+      m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+    });
+
+    it("sizes a SELL in base currency at the risk-check price, never with quote_size", async () => {
+      const { previewAssisted } = await load(true);
+      const previewOrder = vi.fn(async () => cleanPreview());
+      const balances = vi.fn(async () => [{ currency: "BTC", available: 0.01 }]);
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder, balances }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 100 });
+
+      expect(previewOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "SELL", size: { kind: "base", baseSize: "0.002" } });
+      expect(result.order).toMatchObject({ status: "previewed", orderSize: { kind: "base", baseSize: "0.002" } });
+      expect(result.order.detail).toContain("Previewed: sell 0.002 BTC");
+    });
+
+    it("sizes a live SELL down to the Coinbase balance when fees left slightly less than Kairis recorded", async () => {
+      const { previewAssisted } = await load(true);
+      const previewOrder = vi.fn(async () => cleanPreview());
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder, balances: vi.fn(async () => [{ currency: "BTC", available: 0.00995 }]) }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 500 });
+
+      expect(previewOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "SELL", size: { kind: "base", baseSize: "0.00995" } });
+      expect(result.order.detail).toContain("Sized down from 0.01 to the 0.00995 BTC available on Coinbase.");
+    });
+
+    it("blocks a live SELL Coinbase cannot cover without calling preview", async () => {
+      const { previewAssisted } = await load(true);
+      const previewOrder = vi.fn();
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder, balances: vi.fn(async () => [{ currency: "USD", available: 5 }]) }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 100 });
+
+      expect(previewOrder).not.toHaveBeenCalled();
+      expect(result.order).toMatchObject({ status: "blocked" });
+      expect(result.order.detail).toBe("Coinbase shows 0 BTC available (about $0.00), less than the 0.002 BTC this sell needs.");
+      expect(result.decision.checks).toContainEqual({ code: "exchange-rules", passed: false, detail: result.order.detail });
+    });
+  });
+
+  it("blocks below the product minimum and for products closed to market orders, without calling preview", async () => {
+    const { previewAssisted } = await load(true);
+    const previewOrder = vi.fn();
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+
+    const small = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 0.5 });
+    expect(small.order).toMatchObject({ status: "blocked", detail: "The smallest BTC-USD buy Coinbase accepts is $1.00." });
+    expect(small.decision.outcome).toBe("blocked");
+
+    m.getProductRules.mockResolvedValue({ ...BTC_RULES, cancelOnly: true });
+    const closed = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+    expect(closed.order.detail).toBe("BTC-USD is in cancel-only mode on Coinbase: new orders are not accepted.");
+    expect(previewOrder).not.toHaveBeenCalled();
+  });
+
+  it("marks the order blocked, not previewed, when the Coinbase preview lists errs", async () => {
+    const { previewAssisted } = await load(true);
+    const err = "Not enough funds in the Coinbase account for this order. (PREVIEW_INSUFFICIENT_FUND)";
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder: vi.fn(async () => cleanPreview({ errors: [err] })) }));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 });
+
+    expect(result.preview).toBeNull();
+    expect(result.order).toMatchObject({ status: "blocked", reconcileState: "error", detail: `Coinbase would reject this order: ${err}` });
+    expect(result.decision).toMatchObject({ outcome: "blocked" });
+    expect(result.decision.checks).toContainEqual({ code: "exchange-preview", passed: false, detail: `Coinbase would reject this order: ${err}` });
+  });
+
+  it("explains a failure to load the product rules", async () => {
+    const { previewAssisted } = await load(true);
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase"));
+    m.getConnectionStatus.mockResolvedValue({ canTrade: true });
+    m.getProductRules.mockRejectedValue(new Error("Coinbase public request failed (503): down"));
+
+    await expect(previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 100 })).rejects.toThrow(
+      "Kairis could not load the BTC-USD trading rules from Coinbase: Coinbase public request failed (503): down"
+    );
+    expect(m.insertAssistedOrder).not.toHaveBeenCalled();
+  });
+
+  it("gives mock users the same product-rule blocks", async () => {
+    const { previewAssisted } = await load(false);
+    m.getExchangeClient.mockResolvedValue(createMockClient(async () => PRICE, () => "mock-p", async () => BTC_RULES));
+    const result = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 0.5 });
+    expect(result.order).toMatchObject({ status: "blocked", provider: "mock", detail: "The smallest BTC-USD buy Coinbase accepts is $1.00." });
   });
 });
 
@@ -247,13 +361,37 @@ describe("submitAssisted", () => {
   it("sends the order id as client_order_id with the preview id when live trading is enabled", async () => {
     const { submitAssisted } = await load(true);
     current = order({ provider: "coinbase" });
-    const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-1", clientOrderId: ORDER_ID, detail: "Coinbase accepted the order." }));
+    const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-1", clientOrderId: ORDER_ID, failureReason: null, detail: "Coinbase accepted the order." }));
     m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
 
     const result = await submitAssisted(USER, ORDER_ID);
 
-    expect(createOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "BUY", quoteUsd: 100, clientOrderId: ORDER_ID, previewId: "prev-1" });
+    expect(createOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "100" }, clientOrderId: ORDER_ID, previewId: "prev-1" });
     expect(result).toMatchObject({ status: "submitted", orderId: "cb-1" });
+  });
+
+  it("submits a SELL with the exact base size stored at preview", async () => {
+    const { submitAssisted } = await load(true);
+    m.listAssistedOrders.mockResolvedValue([order({ id: "held-1", status: "filled", quoteUsd: 500, filledSize: 0.01, averagePrice: PRICE, createdAt: "2026-10-09T10:00:00.000Z" })]);
+    current = order({ provider: "coinbase", side: "SELL", orderSize: { kind: "base", baseSize: "0.00199999" } });
+    const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-2", clientOrderId: ORDER_ID, failureReason: null, detail: "Coinbase accepted the order." }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
+
+    await submitAssisted(USER, ORDER_ID);
+
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ side: "SELL", size: { kind: "base", baseSize: "0.00199999" } }));
+  });
+
+  it("blocks a preview with no recorded size instead of guessing one", async () => {
+    const { submitAssisted } = await load(true);
+    current = order({ provider: "coinbase", orderSize: null });
+    const client = fakeClient("coinbase");
+    m.getExchangeClient.mockResolvedValue(client);
+
+    const result = await submitAssisted(USER, ORDER_ID);
+
+    expect(result).toMatchObject({ status: "blocked", detail: "This preview has no recorded order size; preview again." });
+    expect(client.createOrder).not.toHaveBeenCalled();
   });
 
   it("blocks when the risk re-check fails at submit time", async () => {
@@ -281,11 +419,13 @@ describe("submitAssisted", () => {
 
   it("releases the claim when the risk check throws before the exchange, so the order can be resubmitted", async () => {
     const { submitAssisted } = await load(false);
+    // A fresh client order id: the mock, like Coinbase, answers a repeated one with the existing order.
+    current = order({ id: "22222222-2222-4222-8222-222222222222" });
     m.getLimits.mockRejectedValueOnce(new Error("db down"));
     m.getExchangeClient.mockResolvedValue(createMockClient(async () => PRICE, () => "mock-order-2"));
 
     await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("db down");
-    expect(m.releaseSubmitClaim).toHaveBeenCalledWith(ORDER_ID, USER);
+    expect(m.releaseSubmitClaim).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222", USER);
     expect(current.status).toBe("previewed");
 
     const retry = await submitAssisted(USER, ORDER_ID);

@@ -1,4 +1,7 @@
-import type { ProductId, Side } from "@/lib/types";
+import type { OrderSize, ProductId, Side } from "@/lib/types";
+
+export type { OrderSize } from "@/lib/types";
+export type { ProductRules } from "@/lib/exchange/sizing";
 
 export type ExchangeProviderName = "coinbase" | "mock";
 
@@ -13,7 +16,8 @@ export type KeyPermissions = {
 
 export type Balance = { currency: string; available: number };
 
-export type OrderInput = { productId: ProductId; side: Side; quoteUsd: number };
+/** A market IOC order. SELL must be sized in base (coins); Coinbase refuses quote_size for market sells. */
+export type OrderInput = { productId: ProductId; side: Side; size: OrderSize };
 
 export type OrderPreview = {
   previewId: string | null;
@@ -21,6 +25,11 @@ export type OrderPreview = {
   commissionTotal: number;
   bestBid: number | null;
   bestAsk: number | null;
+  /** What Coinbase computed for the order, in coins and dollars. */
+  baseSize: number | null;
+  quoteSize: number | null;
+  /** From `errs`: why Coinbase would reject this order. Non-empty means the order must not be submitted. */
+  errors: string[];
   warnings: string[];
 };
 
@@ -29,6 +38,8 @@ export type OrderSubmitResult = {
   orderId: string | null;
   clientOrderId: string;
   detail: string;
+  /** new_order_failure_reason (or the deprecated fields) when Coinbase rejected the order. */
+  failureReason: string | null;
 };
 
 export type ExchangeOrderStatus =

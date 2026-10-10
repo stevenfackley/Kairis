@@ -61,13 +61,18 @@ export type PaperTrade = {
   status: PaperTradeStatus; realizedPnlUsd: number; note: string; signalId: string | null; riskDecision: RiskDecision | null; createdAt: string;
 };
 
-export type AssistedStatus = "previewed" | "submitted" | "blocked" | "filled" | "cancelled" | "failed" | "expired";
+/** How a market order is sized on Coinbase: dollars for a BUY (quote_size), coins for a SELL (base_size). */
+export type OrderSize = { kind: "quote"; quoteSize: string } | { kind: "base"; baseSize: string };
+
+export type AssistedStatus ="previewed" | "submitted" | "blocked" | "filled" | "cancelled" | "failed" | "expired";
 export type ReconcileState = "pending" | "reconciled" | "error";
 export type AssistedOrder = {
   id: string; userId: string; productId: ProductId; side: Side; quoteUsd: number; status: AssistedStatus; reconcileState: ReconcileState;
   reconciledAt: string | null; provider: "coinbase" | "mock"; detail: string; orderId: string | null; clientOrderId: string | null;
   previewId: string | null; exchangeStatus: string | null; filledSize: number | null; averagePrice: number | null; totalFees: number | null;
   signalId: string | null; riskDecision: RiskDecision | null; createdAt: string; updatedAt: string;
+  /** The exact size previewed; submit sends this, never a re-computed one. */
+  orderSize?: OrderSize | null;
 };
 
 export type AuditCategory = "auth" | "onboarding" | "limits" | "signal" | "risk" | "paper-trade" | "assisted-order" | "exchange" | "export" | "operations" | "auto";

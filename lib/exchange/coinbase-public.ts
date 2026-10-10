@@ -1,5 +1,6 @@
 import type { Candle, Ticker } from "@/lib/types";
 import { ExchangeHttpError, ExchangeTransportError, scrubSecrets } from "@/lib/exchange/errors";
+import type { ProductRules } from "@/lib/exchange/sizing";
 import type { FetchLike } from "@/lib/exchange/types";
 
 type Granularity = "ONE_HOUR" | "ONE_DAY" | "FIFTEEN_MINUTE";
@@ -107,4 +108,93 @@ export async function fetchCandles(
 export async function fetchTicker(productId: string, fetchImpl: FetchLike = fetch): Promise<Ticker> {
   const url = `${baseUrl}/${encodeURIComponent(productId)}/ticker?limit=1`;
   return mapTicker(productId, await getJson(fetchImpl, url));
+}
+
+const PLAIN_DECIMAL = /^\d+(\.\d+)?$/;
+
+/** Maps GET /api/v3/brokerage/market/products/{product_id} into the rules order sizing needs. */
+export function mapProduct(json: unknown): ProductRules {
+  if (!isRecord(json) || typeof json.product_id !== "string" || json.product_id === "") {
+    throw new Error("Malformed Coinbase product response.");
+  }
+  const productId = json.product_id;
+  const increment = (value: unknown, label: string): string => {
+    const s = typeof value === "string" ? value.trim() : "";
+    if (!PLAIN_DECIMAL.test(s) || Number(s) <= 0) {
+      throw new Error(`Malformed Coinbase product response: ${label} is not a positive decimal.`);
+    }
+    return s;
+  };
+  // An empty or missing bound means Coinbase sets none.
+  const bound = (value: unknown): string => {
+    const s = typeof value === "string" ? value.trim() : "";
+    return PLAIN_DECIMAL.test(s) ? s : "0";
+  };
+  const baseCurrency =
+    typeof json.base_currency_id === "string" && json.base_currency_id !== "" ? json.base_currency_id : productId.split("-")[0] ?? productId;
+  return {
+    productId,
+    baseCurrency,
+    status: typeof json.status === "string" ? json.status : "",
+    baseIncrement: increment(json.base_increment, "base_increment"),
+    quoteIncrement: increment(json.quote_increment, "quote_increment"),
+    baseMinSize: bound(json.base_min_size),
+    baseMaxSize: bound(json.base_max_size),
+    quoteMinSize: bound(json.quote_min_size),
+    quoteMaxSize: bound(json.quote_max_size),
+    isDisabled: json.is_disabled === true,
+    tradingDisabled: json.trading_disabled === true,
+    cancelOnly: json.cancel_only === true,
+    limitOnly: json.limit_only === true,
+    postOnly: json.post_only === true,
+    viewOnly: json.view_only === true
+  };
+}
+
+export async function fetchProduct(productId: string, fetchImpl: FetchLike = fetch): Promise<ProductRules> {
+  try {
+    return mapProduct(await getJson(fetchImpl, `${baseUrl}/${encodeURIComponent(productId)}`));
+  } catch (error) {
+    if (error instanceof ExchangeHttpError && (error.status === 404 || error.status === 400)) {
+      throw new ExchangeHttpError(error.status, `Coinbase does not offer ${productId} for trading (HTTP ${error.status}).`, null);
+    }
+    throw error;
+  }
+}
+
+// Increments and limits change rarely; five minutes keeps a burst of previews to one fetch per product.
+const PRODUCT_TTL_MS = 5 * 60_000;
+const productCache = new Map<string, { rules: ProductRules; fetchedAt: number }>();
+const productInflight = new Map<string, Promise<ProductRules>>();
+let productLoader: (productId: string) => Promise<ProductRules> = (productId) => fetchProduct(productId);
+
+/** Tests only: swap the product loader (null restores the real one). Clears the cache. */
+export function __setProductLoader(loader: ((productId: string) => Promise<ProductRules>) | null): void {
+  productLoader = loader ?? ((productId) => fetchProduct(productId));
+  productCache.clear();
+  productInflight.clear();
+}
+
+/** Cached product rules; failures are not cached. */
+export async function getProductRules(productId: string, nowMs = Date.now()): Promise<ProductRules> {
+  const hit = productCache.get(productId);
+  if (hit && nowMs - hit.fetchedAt < PRODUCT_TTL_MS) {
+    return hit.rules;
+  }
+  const pending = productInflight.get(productId);
+  if (pending) {
+    return pending;
+  }
+  const request = productLoader(productId).then((rules) => {
+    productCache.set(productId, { rules, fetchedAt: Date.now() });
+    return rules;
+  });
+  productInflight.set(productId, request);
+  try {
+    return await request;
+  } finally {
+    if (productInflight.get(productId) === request) {
+      productInflight.delete(productId);
+    }
+  }
 }

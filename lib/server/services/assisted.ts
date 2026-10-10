@@ -1,7 +1,10 @@
 import { env } from "@/lib/env";
+import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { createMockClient } from "@/lib/exchange/mock";
+import { describeSize, sizeMarketOrder, type ProductRules } from "@/lib/exchange/sizing";
 import type { ExchangeClient, OrderPreview, OrderStatus, OrderSubmitResult } from "@/lib/exchange/types";
+import { usd } from "@/lib/format";
 import {
   claimPreviewedOrder,
   getAssistedOrder,
@@ -22,15 +25,36 @@ export const PREVIEW_TTL_MS = 120_000;
 const EXPIRED_DETAIL = "Preview expired after 2 minutes; preview again.";
 const LIVE_DISABLED_DETAIL = "Live assisted trading is disabled by environment policy (ENABLE_LIVE_ASSISTED_TRADING=false).";
 const PROVIDER_CHANGED_DETAIL = "The exchange connection changed since this preview; preview again.";
+const NO_SIZE_DETAIL = "This preview has no recorded order size; preview again.";
 const NO_TRADE_PERMISSION_DETAIL =
   "The connected Coinbase key has no trade permission. Create a trade-only key (no transfer permission) and reconnect.";
 const UNKNOWN_STATUS_DETAIL = "Exchange returned an unknown status; check the order on Coinbase.";
 
-const label = (o: Pick<AssistedOrder, "side" | "productId" | "quoteUsd">) => `${o.side} ${o.productId} $${o.quoteUsd}`;
+const label = (o: Pick<AssistedOrder, "side" | "productId" | "quoteUsd">) => `${o.side} ${o.productId} ${usd(o.quoteUsd)}`;
 
 async function record(userId: string, order: AssistedOrder, action: string): Promise<AssistedOrder> {
   await appendAudit(userId, "assisted-order", action, `${label(order)}: ${order.detail}`);
   return order;
+}
+
+function withFailedCheck(decision: RiskDecision, code: string, detail: string): RiskDecision {
+  return {
+    outcome: "blocked",
+    checks: [...decision.checks, { code, passed: false, detail }],
+    reasons: [...decision.reasons, detail],
+    evaluatedAt: decision.evaluatedAt
+  };
+}
+
+/** The coins Coinbase reports available, 0 when the account holds none, null when unknown. */
+async function availableBase(client: ExchangeClient, currency: string): Promise<number | null> {
+  try {
+    const balances = await client.balances();
+    return balances.find((b) => b.currency === currency)?.available ?? 0;
+  } catch {
+    // The preview's errs still catch an oversized sell; an unreadable balance must not block it here.
+    return null;
+  }
 }
 
 export async function previewAssisted(
@@ -38,7 +62,7 @@ export async function previewAssisted(
   intent: Omit<OrderIntent, "mode">
 ): Promise<{ decision: RiskDecision; order: AssistedOrder; preview: OrderPreview | null }> {
   const live: OrderIntent = { ...intent, mode: "live" };
-  const { decision } = await checkOrder(userId, live);
+  const { decision, context } = await checkOrder(userId, live);
   const client = await getExchangeClient(userId);
   const base: AssistedOrder = {
     id: "",
@@ -60,54 +84,75 @@ export async function previewAssisted(
     totalFees: null,
     signalId: live.signalId || null,
     riskDecision: decision,
+    orderSize: null,
     createdAt: "",
     updatedAt: ""
   };
-
-  if (decision.outcome !== "approved") {
+  const block = async (detail: string, riskDecision: RiskDecision, extra: Partial<AssistedOrder> = {}) => {
     const order = await insertAssistedOrder({
       ...base,
+      ...extra,
       status: "blocked",
       reconcileState: "error",
       reconciledAt: new Date().toISOString(),
-      detail: decision.reasons.join(" ")
+      detail,
+      riskDecision
     });
-    return { decision, order: await record(userId, order, "blocked"), preview: null };
+    return { decision: riskDecision, order: await record(userId, order, "blocked"), preview: null };
+  };
+
+  if (decision.outcome !== "approved") {
+    return block(decision.reasons.join(" "), decision);
   }
 
   if (client.provider === "coinbase" && (await getConnectionStatus(userId))?.canTrade === false) {
-    const blocked: RiskDecision = {
-      outcome: "blocked",
-      checks: [...decision.checks, { code: "exchange-key", passed: false, detail: NO_TRADE_PERMISSION_DETAIL }],
-      reasons: [...decision.reasons, NO_TRADE_PERMISSION_DETAIL],
-      evaluatedAt: decision.evaluatedAt
-    };
-    const order = await insertAssistedOrder({
-      ...base,
-      status: "blocked",
-      reconcileState: "error",
-      reconciledAt: new Date().toISOString(),
-      detail: NO_TRADE_PERMISSION_DETAIL,
-      riskDecision: blocked
-    });
-    return { decision: blocked, order: await record(userId, order, "blocked"), preview: null };
+    return block(NO_TRADE_PERMISSION_DETAIL, withFailedCheck(decision, "exchange-key", NO_TRADE_PERMISSION_DETAIL));
+  }
+
+  // Coinbase's own rules for this product (state, increments, minimums) size the order once, here.
+  // Submit sends exactly this size, so the preview and the order can never disagree.
+  let rules: ProductRules;
+  try {
+    rules = await getProductRules(live.productId);
+  } catch (error) {
+    const message = `Kairis could not load the ${live.productId} trading rules from Coinbase: ${normalizeExchangeError(error).message}`;
+    await appendAudit(userId, "assisted-order", "preview-failed", `${label(live)}: ${message}`);
+    throw new Error(message);
+  }
+  const available = client.provider === "coinbase" && live.side === "SELL" ? await availableBase(client, rules.baseCurrency) : null;
+  const sizing = sizeMarketOrder({ side: live.side, quoteUsd: live.quoteUsd, price: context.referencePrice, rules, availableBase: available });
+  if (!sizing.ok) {
+    return block(sizing.reason, withFailedCheck(decision, "exchange-rules", sizing.reason));
   }
 
   let preview: OrderPreview;
   try {
-    preview = await client.previewOrder({ productId: live.productId, side: live.side, quoteUsd: live.quoteUsd });
+    preview = await client.previewOrder({ productId: live.productId, side: live.side, size: sizing.size });
   } catch (error) {
     const normalized = normalizeExchangeError(error);
     await appendAudit(userId, "assisted-order", "preview-failed", `${label(live)}: ${normalized.message}`);
     throw new Error(normalized.message);
   }
+
+  // A non-empty errs list is Coinbase saying the order would be rejected: never offer it for submit.
+  if (preview.errors.length > 0) {
+    const detail = `Coinbase would reject this order: ${preview.errors.join(" ")}`;
+    return block(detail, withFailedCheck(decision, "exchange-preview", detail), { orderSize: sizing.size, previewId: preview.previewId });
+  }
+
   const order = await insertAssistedOrder({
     ...base,
     status: "previewed",
     reconcileState: "pending",
     reconciledAt: null,
     previewId: preview.previewId,
-    detail: `Preview total $${preview.orderTotal} with commission $${preview.commissionTotal}.`
+    orderSize: sizing.size,
+    detail: [
+      `Previewed: ${describeSize(sizing.size, live.productId)}, order total ${usd(preview.orderTotal)} including ${usd(preview.commissionTotal)} commission.`,
+      sizing.note
+    ]
+      .filter(Boolean)
+      .join(" ")
   });
   return { decision, order: await record(userId, order, "previewed"), preview };
 }
@@ -135,7 +180,9 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
       "blocked"
     );
 
-  type Gate = { settled: AssistedOrder; client?: undefined; decision?: undefined } | { settled?: undefined; client: ExchangeClient; decision: RiskDecision };
+  type Gate =
+    | { settled: AssistedOrder; client?: undefined; decision?: undefined; size?: undefined }
+    | { settled?: undefined; client: ExchangeClient; decision: RiskDecision; size: NonNullable<AssistedOrder["orderSize"]> };
   const preflight = async (): Promise<Gate> => {
     if (Date.now() - Date.parse(order.createdAt) > PREVIEW_TTL_MS) {
       const expired = await updateAssistedOrder(order.id, {
@@ -146,6 +193,9 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
       });
       await record(userId, expired, "expired");
       throw new Error(EXPIRED_DETAIL);
+    }
+    if (!order.orderSize) {
+      return { settled: await block(NO_SIZE_DETAIL) };
     }
 
     // Limits are re-checked at submit time: fills or a pause since the preview must win.
@@ -167,30 +217,29 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
     if (client.provider === "coinbase" && !env.liveAssistedTradingEnabled) {
       return { settled: await block(LIVE_DISABLED_DETAIL, decision) };
     }
-    return { client, decision };
+    return { client, decision, size: order.orderSize };
   };
 
   // Until createOrder is reached nothing has left the building, so a throw here must free the claim.
   // After that point a retry could double-send, so the claim stays.
-  let client: ExchangeClient;
-  let decision: RiskDecision;
+  let gate: Gate;
   try {
-    const gate = await preflight();
-    if (gate.settled) {
-      return gate.settled;
-    }
-    ({ client, decision } = gate);
+    gate = await preflight();
   } catch (error) {
     await releaseSubmitClaim(order.id, userId);
     throw error;
   }
+  if (gate.settled) {
+    return gate.settled;
+  }
+  const { client, decision, size } = gate;
 
   let result: OrderSubmitResult;
   try {
     result = await client.createOrder({
       productId: order.productId,
       side: order.side,
-      quoteUsd: order.quoteUsd,
+      size,
       clientOrderId: order.id,
       previewId: order.previewId
     });
@@ -263,7 +312,7 @@ export async function reconcileAssisted(userId: string): Promise<{ checked: numb
     if (!client) {
       client =
         provider === "mock"
-          ? Promise.resolve(createMockClient(getReferencePrice))
+          ? Promise.resolve(createMockClient(getReferencePrice, undefined, getProductRules))
           : getExchangeClient(userId).then((c) => {
               if (c.provider !== "coinbase") {
                 throw new Error("No Coinbase connection is available to reconcile this order; reconnect the exchange.");

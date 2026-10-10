@@ -1,6 +1,7 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import { describeHttpFailure, ExchangeTransportError } from "@/lib/exchange/errors";
 import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
+import { describeOrderFailure, describePreviewFailure, describePreviewWarning } from "@/lib/exchange/reasons";
 import type {
   Balance,
   ExchangeClient,
@@ -58,6 +59,11 @@ export function mapKeyPermissions(json: unknown): KeyPermissions {
 }
 
 export function mapBalances(json: unknown): Balance[] {
+  return mapAccountsPage(json).balances;
+}
+
+/** One page of GET /api/v3/brokerage/accounts: { accounts, has_next, cursor, size }. */
+export function mapAccountsPage(json: unknown): { balances: Balance[]; cursor: string | null } {
   if (!isRecord(json) || !Array.isArray(json.accounts)) {
     throw new Error("Malformed Coinbase accounts response.");
   }
@@ -71,9 +77,11 @@ export function mapBalances(json: unknown): Balance[] {
       out.push({ currency: account.currency, available });
     }
   }
-  return out;
+  return { balances: out, cursor: json.has_next === true ? optStr(json.cursor) : null };
 }
 
+// POST /api/v3/brokerage/orders/preview. `errs` is "List of potential failure reasons were this order to
+// be submitted" (PreviewFailureReason codes): any entry means the order would be rejected.
 export function mapPreview(json: unknown): OrderPreview {
   if (!isRecord(json)) {
     throw new Error("Malformed Coinbase preview response.");
@@ -84,25 +92,35 @@ export function mapPreview(json: unknown): OrderPreview {
     commissionTotal: optNum(json.commission_total) ?? 0,
     bestBid: optNum(json.best_bid),
     bestAsk: optNum(json.best_ask),
-    warnings: [...strList(json.errs), ...strList(json.warning)]
+    baseSize: optNum(json.base_size),
+    quoteSize: optNum(json.quote_size),
+    errors: strList(json.errs).map(describePreviewFailure),
+    warnings: strList(json.warning)
+      .map(describePreviewWarning)
+      .filter((w): w is string => w !== null)
   };
 }
 
+// POST /api/v3/brokerage/orders: { success, success_response: { order_id, ... }, error_response:
+// { new_order_failure_reason, error_details, message, error (deprecated), preview_failure_reason (deprecated) } }.
 export function mapSubmit(json: unknown, clientOrderId: string): OrderSubmitResult {
   if (!isRecord(json)) {
     throw new Error("Malformed Coinbase create order response.");
   }
   if (json.success === false) {
     const err = isRecord(json.error_response) ? json.error_response : {};
+    const reason =
+      [err.new_order_failure_reason, err.preview_failure_reason, err.error, json.failure_reason]
+        .map(optStr)
+        .find((r): r is string => r !== null && !r.startsWith("UNKNOWN_")) ?? null;
+    const said = optStr(err.error_details) ?? optStr(err.message);
+    const parts = [reason ? describeOrderFailure(reason) : "", said ? `Coinbase says: "${said.replace(/[.\s]+$/, "")}".` : ""].filter(Boolean);
     return {
       success: false,
       orderId: null,
       clientOrderId,
-      detail:
-        optStr(err.error_details) ??
-        optStr(err.message) ??
-        optStr(err.preview_failure_reason) ??
-        "Coinbase rejected the order."
+      failureReason: reason,
+      detail: parts.length > 0 ? `Coinbase rejected the order. ${parts.join(" ")}` : "Coinbase rejected the order without giving a reason."
     };
   }
   const ok = isRecord(json.success_response) ? json.success_response : {};
@@ -111,6 +129,7 @@ export function mapSubmit(json: unknown, clientOrderId: string): OrderSubmitResu
     success: orderId !== null,
     orderId,
     clientOrderId: optStr(ok.client_order_id) ?? clientOrderId,
+    failureReason: null,
     detail: orderId ? "Coinbase accepted the order." : "Coinbase response did not include an order id."
   };
 }
@@ -152,8 +171,14 @@ export function mapOrderStatus(json: unknown): OrderStatus {
   };
 }
 
+// "To buy a product, provide a quote_size or base_size; to sell, provide a base_size" (Advanced Trade orders guide).
 function marketOrder(input: OrderInput) {
-  return { market_market_ioc: { quote_size: input.quoteUsd.toFixed(2) } };
+  if (input.side === "SELL" && input.size.kind !== "base") {
+    throw new Error("A market SELL must be sized in base currency (base_size).");
+  }
+  return {
+    market_market_ioc: input.size.kind === "quote" ? { quote_size: input.size.quoteSize } : { base_size: input.size.baseSize }
+  };
 }
 
 export function createCoinbaseClient(
@@ -213,7 +238,17 @@ export function createCoinbaseClient(
       return mapKeyPermissions(await request<unknown>("GET", `${basePath}/key_permissions`));
     },
     async balances() {
-      return mapBalances(await request<unknown>("GET", `${basePath}/accounts?limit=250`));
+      // Paged by cursor; an account holds one currency and a busy user can have hundreds of them.
+      const all: Balance[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const query: string = cursor ? `?limit=250&cursor=${encodeURIComponent(cursor)}` : "?limit=250";
+        const mapped = mapAccountsPage(await request<unknown>("GET", `${basePath}/accounts${query}`));
+        all.push(...mapped.balances);
+        cursor = mapped.cursor;
+        if (!cursor) break;
+      }
+      return all;
     },
     async previewOrder(input) {
       const json = await request<unknown>("POST", `${basePath}/orders/preview`, {

@@ -6,6 +6,7 @@ import { CUSTOM_PRODUCT, isWatchlistProduct } from "@/app/app/trade/order-form";
 import { INITIAL_PREVIEW, INITIAL_SUBMIT, PREVIEW_TTL_SECONDS, type SubmitState } from "@/app/app/trade/state";
 import { RiskDecisionView } from "@/components/risk-decision";
 import { WATCHLIST } from "@/lib/domain/strategy";
+import { describeSize } from "@/lib/exchange/sizing";
 import type { OrderPreview } from "@/lib/exchange/types";
 import { usd } from "@/lib/format";
 import type { AssistedOrder, AssistedStatus, Side } from "@/lib/types";
@@ -75,7 +76,8 @@ function resultCopy(order: AssistedOrder): string {
   return `Status: ${order.status}. ${order.detail}`;
 }
 
-function PreviewPanel({ preview, provider }: { preview: OrderPreview; provider: Provider }) {
+function PreviewPanel({ preview, order }: { preview: OrderPreview; order: AssistedOrder }) {
+  const provider = order.provider;
   return (
     <section className="panel ticket-preview" aria-labelledby="ticket-preview-heading">
       <div className="panel-heading">
@@ -85,6 +87,12 @@ function PreviewPanel({ preview, provider }: { preview: OrderPreview; provider: 
         </span>
       </div>
       <div className="status-stack">
+        {order.orderSize ? (
+          <div className="status-row">
+            <span>Order sent</span>
+            <strong>{describeSize(order.orderSize, order.productId)}</strong>
+          </div>
+        ) : null}
         <div className="status-row">
           <span>Order total</span>
           <strong>{money(preview.orderTotal)}</strong>
@@ -232,7 +240,10 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
                 value={quote}
                 onChange={(event) => setQuote(event.target.value)}
               />
-              <span className="field-help">Dollars to spend on a buy, or the dollar value to sell.</span>
+              <span className="field-help">
+                A buy spends this many dollars, fees included. A sell converts the dollars to coins at the current price,
+                rounded down to the coin&apos;s smallest step on Coinbase.
+              </span>
             </label>
           </div>
           <input type="hidden" name="signalId" value={signalId ?? ""} />
@@ -265,7 +276,7 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
         <RiskDecisionView decision={previewState.decision} />
       ) : null}
 
-      {previewed ? <PreviewPanel preview={previewed.preview} provider={previewed.order.provider} /> : null}
+      {previewed ? <PreviewPanel preview={previewed.preview} order={previewed.order} /> : null}
 
       {step === 2 && previewState.step === "blocked" ? (
         <div className="button-row">
