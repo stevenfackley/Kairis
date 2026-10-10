@@ -160,8 +160,9 @@ export default async function OperationsPage({ searchParams }: { searchParams: P
       <section className="panel" aria-labelledby="auto-heading">
         <h2 id="auto-heading">Auto mode</h2>
         <p className="panel-copy">
-          One auto cycle evaluates the watchlist and may place live orders. It runs only when every gate is open: owner role, ENABLE_AUTO_MODE,
-          ENABLE_LIVE_ASSISTED_TRADING and a connected Coinbase key. Risk limits still apply.
+          Auto mode runs one cycle only when you press the button. There is no scheduler. A cycle evaluates the watchlist and may
+          place live orders. It enforces these gates: owner role, ENABLE_AUTO_MODE, ENABLE_LIVE_ASSISTED_TRADING and a connected
+          Coinbase key. Risk limits still apply (exits are always allowed; the kill switch stops everything).
         </p>
         <div className="status-stack">
           <div className="status-row">

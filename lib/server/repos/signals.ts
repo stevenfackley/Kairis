@@ -1,5 +1,5 @@
 import { query } from "@/lib/server/db";
-import { toIso, toJsonParam, toNumber, toNumberOrNull, toStringArray, type Numeric, type Timestamp } from "@/lib/server/repos/map";
+import { toIso, toJsonParam, toNumber, toNumberOrNull, toNumericParam, toStringArray, type Numeric, type Timestamp } from "@/lib/server/repos/map";
 import type { SignalAction, SignalEvaluation, SignalRecord } from "@/lib/types";
 
 type SignalRow = {
@@ -21,6 +21,10 @@ const COLUMNS = "id, product_id, action, setup, rationale, strength, reference_p
 
 // data_age_ms is a Postgres integer; a missing ticker time can yield an age far past int4.
 const MAX_INT4 = 2147483647;
+// Column limits: strength numeric(4,3), reference_price numeric(18,8), atr_pct/rsi/spread_pct numeric(8,4).
+const MAX_STRENGTH = 9.999;
+const MAX_PRICE = 9_999_999_999.99999999;
+const MAX_PCT = 9999.9999;
 
 function mapSignal(row: SignalRow): SignalRecord {
   return {
@@ -49,11 +53,14 @@ export async function insertSignal(evaluation: SignalEvaluation): Promise<Signal
       evaluation.action,
       evaluation.setup,
       toJsonParam(evaluation.rationale),
-      evaluation.strength,
-      evaluation.referencePrice,
-      evaluation.atrPct,
-      evaluation.rsi,
-      evaluation.spreadPct,
+      toNumericParam(evaluation.strength, MAX_STRENGTH) ?? 0,
+      // A price that cannot be stored is recorded as 0, which every view shows as "n/a".
+      evaluation.referencePrice > 0 && evaluation.referencePrice <= MAX_PRICE ? evaluation.referencePrice : 0,
+      toNumericParam(evaluation.atrPct, MAX_PCT),
+      // RSI is 0-100 by definition.
+      toNumericParam(evaluation.rsi === null ? null : Math.max(0, Math.min(100, evaluation.rsi)), MAX_PCT),
+      // A clamped spread is still far over the limit, so the signal stays blocked.
+      toNumericParam(evaluation.spreadPct, MAX_PCT),
       Math.min(MAX_INT4, Math.max(0, Math.round(evaluation.dataAgeMs))),
       evaluation.evaluatedAt
     ]

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { isUuid, parseAssistedForm } from "@/app/app/trade/order-form";
 import type { PreviewState, SubmitState } from "@/app/app/trade/state";
-import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
+import { previewAssisted, reconcileAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
 import { errorMessage } from "@/lib/server/services/shared";
 import { requireOnboarded } from "@/lib/server/session";
 
@@ -43,7 +43,8 @@ export async function submitAssistedAction(_prev: SubmitState, formData: FormDat
     return { step: "error", error: "Tick the confirmation that you reviewed the risk checks and the exchange preview." };
   }
   try {
-    const order = await submitAssisted(user.id, orderId);
+    // A market IOC order usually fills at once: record that now rather than leave a bare "submitted".
+    const order = await settleAssisted(user.id, await submitAssisted(user.id, orderId));
     revalidateTradeViews();
     return { step: "result", order };
   } catch (error) {

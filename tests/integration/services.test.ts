@@ -17,14 +17,16 @@ const { scratchDir } = vi.hoisted(() => {
   return { scratchDir: dir };
 });
 
+import { __setProductLoader, mapProduct } from "@/lib/exchange/coinbase-public";
+import type { ProductRules } from "@/lib/exchange/types";
 import { closePool, query } from "@/lib/server/db";
 import { getAssistedOrder } from "@/lib/server/repos/assisted";
 import { listAudit } from "@/lib/server/repos/audit";
 import { listExports } from "@/lib/server/repos/exports";
 import { saveLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
-import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
-import { createExport } from "@/lib/server/services/exports";
+import { previewAssisted, reconcileAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
+import { createExport, openExportDownload } from "@/lib/server/services/exports";
 import { __setMarketFetchers } from "@/lib/server/services/market";
 import { placePaperOrder } from "@/lib/server/services/paper";
 import { buildRiskContext } from "@/lib/server/services/risk";
@@ -60,10 +62,32 @@ function ticker(productId: string): Ticker {
   return { productId, price: PRICE, bestBid: PRICE - 0.01, bestAsk: PRICE + 0.01, tradeTime: Date.now() };
 }
 
+// Coinbase's BTC-USD rules (captured 2026-10-10), applied to every product the suite trades.
+function rules(productId: string): ProductRules {
+  return {
+    productId,
+    baseCurrency: productId.split("-")[0]!,
+    status: "online",
+    baseIncrement: "0.00000001",
+    quoteIncrement: "0.01",
+    baseMinSize: "0.00000001",
+    baseMaxSize: "3400",
+    quoteMinSize: "1",
+    quoteMaxSize: "150000000",
+    isDisabled: false,
+    tradingDisabled: false,
+    cancelOnly: false,
+    limitOnly: false,
+    postOnly: false,
+    viewOnly: false
+  };
+}
+
 describe.skipIf(!enabled)("services", () => {
   beforeAll(async () => {
     execFileSync("node", ["scripts/db-migrate.mjs"], { cwd: repoRoot, env: process.env, stdio: "pipe" });
     __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    __setProductLoader(async (productId) => rules(productId));
   });
 
   beforeEach(async () => {
@@ -74,6 +98,7 @@ describe.skipIf(!enabled)("services", () => {
 
   afterAll(async () => {
     __setMarketFetchers(null);
+    __setProductLoader(null);
     await rm(path.resolve(repoRoot, scratchDir), { recursive: true, force: true });
     await closePool();
   });
@@ -92,7 +117,8 @@ describe.skipIf(!enabled)("services", () => {
 
     const first = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
     expect(first.decision.outcome).toBe("approved");
-    expect(first.trade).toMatchObject({ status: "filled", baseSize: 6, price: PRICE, quoteUsd: 600 });
+    // $600 spent including the 0.6% fee, as on Coinbase: 600 / 1.006 = 596.42147117 of coins, 3.57852883 fee.
+    expect(first.trade).toMatchObject({ status: "filled", baseSize: 5.96421471, price: PRICE, quoteUsd: 600, feeUsd: 3.57852883 });
     expect(first.trade.id).toMatch(/^[0-9a-f-]{36}$/);
 
     const second = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 600 });
@@ -107,8 +133,59 @@ describe.skipIf(!enabled)("services", () => {
     expect(await listAudit(USER, { category: "risk" })).toHaveLength(2);
 
     const context = await buildRiskContext(USER, "paper", "BTC-USD");
-    expect(context.positions["BTC-USD"]).toMatchObject({ baseSize: 6, avgCost: PRICE, notionalUsd: 600 });
+    // The fee is part of the cost basis, which is the $600 spent: 600 / 5.96421471 = 100.60 a coin.
+    expect(context.positions["BTC-USD"]?.baseSize).toBe(5.96421471);
+    expect(context.positions["BTC-USD"]?.notionalUsd).toBeCloseTo(596.421471, 8);
+    expect(context.positions["BTC-USD"]?.avgCost).toBeCloseTo(100.6, 6);
     expect(context.today.tradesCount).toBe(1);
+  });
+
+  it("sells an entire paper position exactly, net of both fees, and leaves it flat", async () => {
+    await placePaperOrder(USER, { productId: "SOL-USD", side: "BUY", quoteUsd: 33.33 });
+    const closed = await placePaperOrder(USER, { productId: "SOL-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+
+    expect(closed.decision.outcome).toBe("approved");
+    // $33.33 bought 0.33131213 SOL (0.19878728 fee included); the sell pays 0.6% of 33.131213 = 0.19878728.
+    expect(closed.trade).toMatchObject({ status: "filled", side: "SELL", baseSize: 0.33131213, quoteUsd: 33.13, feeUsd: 0.19878728 });
+    // Flat at the same price: both fees are lost, 33.131213 - 0.19878728 - 33.33 = -0.39757456, stored to the cent.
+    expect(closed.trade.realizedPnlUsd).toBe(-0.4);
+    const context = await buildRiskContext(USER, "paper", "SOL-USD");
+    expect(context.positions["SOL-USD"]).toBeUndefined();
+    expect(context.today).toMatchObject({ tradesCount: 2, consecutiveLosses: 1 });
+  });
+
+  it("sizes paper orders with the product's Coinbase rules and closes a position without leaving dust", async () => {
+    const shib = mapProduct(JSON.parse(await readFile(path.resolve(repoRoot, "tests/fixtures/coinbase/product-shib-usd.json"), "utf8")));
+    const shibPrice = 0.00000546;
+    __setProductLoader(async (productId) => (productId === "SHIB-USD" ? shib : rules(productId)));
+    __setMarketFetchers({
+      candles: async () => candles(),
+      ticker: async (productId) => (productId === "SHIB-USD" ? { ...ticker(productId), price: shibPrice, bestBid: shibPrice, bestAsk: shibPrice } : ticker(productId))
+    });
+    try {
+      const small = await placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 0.5 });
+      expect(small.decision).toMatchObject({ outcome: "blocked", reasons: ["The smallest BTC-USD buy Coinbase accepts is $1.00."] });
+      expect(small.trade).toMatchObject({ status: "blocked", baseSize: 0, feeUsd: null });
+
+      // 100 / 1.006 / 0.00000546 = 18,205,783.21 SHIB: a fractional fill, as on Coinbase for a quote-sized buy.
+      const bought = await placePaperOrder(USER, { productId: "SHIB-USD", side: "BUY", quoteUsd: 100 });
+      expect(bought.trade).toMatchObject({ status: "filled", quoteUsd: 100, feeUsd: 0.59642147 });
+      expect(bought.trade.baseSize % 1).not.toBe(0);
+
+      // base_increment 1: $50 is 9,157,509.16 SHIB, sold as 9,157,509.
+      const part = await placePaperOrder(USER, { productId: "SHIB-USD", side: "SELL", quoteUsd: 50 });
+      expect(part.trade).toMatchObject({ status: "filled", baseSize: 9157509 });
+
+      // The rest floors to whole SHIB with a fraction left over; the dust rule sells it all.
+      const rest = await placePaperOrder(USER, { productId: "SHIB-USD", side: "SELL", quoteUsd: 0, sellAll: true });
+      expect(rest.decision.outcome).toBe("approved");
+      expect(rest.trade.baseSize).toBeCloseTo(bought.trade.baseSize - 9157509, 8);
+      const context = await buildRiskContext(USER, "paper", "SHIB-USD");
+      expect(context.positions["SHIB-USD"]).toBeUndefined();
+    } finally {
+      __setProductLoader(async (productId) => rules(productId));
+      __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    }
   });
 
   it("previews and submits through the mock provider, then reconcile marks the order filled", async () => {
@@ -123,19 +200,31 @@ describe.skipIf(!enabled)("services", () => {
     expect(submitted.orderId).toBeTruthy();
     await expect(submitAssisted(USER, order.id)).rejects.toThrow("Only a previewed order can be submitted.");
 
-    // An in-flight order already counts toward exposure before reconcile runs.
+    // An in-flight order already counts toward exposure before reconcile runs, estimated as Coinbase will
+    // fill it: the $50 includes the fee, so 50 / 1.006 / 100 coins.
     const inFlight = await buildRiskContext(USER, "live", "BTC-USD");
-    expect(inFlight.positions["BTC-USD"]?.baseSize).toBeCloseTo(0.5, 8);
+    expect(inFlight.positions["BTC-USD"]?.baseSize).toBe(0.49701789);
     expect(inFlight.today.tradesCount).toBe(1);
 
     expect(await reconcileAssisted(USER)).toEqual({ checked: 1, updated: 1 });
     const filled = await getAssistedOrder(order.id, USER);
-    expect(filled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.5, averagePrice: PRICE, totalFees: 0.3 });
+    // $50 spent including the fee, as on Coinbase: 49.70178926 bought coins and 0.29821074 was the fee.
+    expect(filled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.49701789, averagePrice: PRICE, totalFees: 0.29821074 });
+    expect(filled?.orderSize).toEqual({ kind: "quote", quoteSize: "50" });
     expect(filled?.reconciledAt).not.toBeNull();
     expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
 
     const actions = (await listAudit(USER, { category: "assisted-order" })).map((e) => e.action).sort();
     expect(actions).toEqual(["previewed", "submitted"]);
+  });
+
+  it("settles a just-submitted order that already filled", async () => {
+    const { order } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
+    const settled = await settleAssisted(USER, await submitAssisted(USER, order.id));
+    expect(settled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.49701789 });
+    expect(settled.detail).toBe("Filled 0.49701789 BTC at an average $100.00, fees $0.30.");
+    expect(await getAssistedOrder(order.id, USER)).toEqual(settled);
+    expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
   });
 
   it("lets exactly one of two concurrent submits through", async () => {
@@ -164,10 +253,17 @@ describe.skipIf(!enabled)("services", () => {
     expect(artifact.location.startsWith(path.resolve(repoRoot, scratchDir, "exports"))).toBe(true);
     expect(path.basename(artifact.location)).toMatch(/^paper-journal-user-1-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}\.csv$/);
     const lines = (await readFile(artifact.location, "utf8")).split("\n");
-    expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,status,realizedPnlUsd,signalId,note");
+    expect(lines[0]).toBe("id,createdAt,productId,side,baseSize,price,quoteUsd,feeUsd,status,realizedPnlUsd,signalId,note");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain(",ETH-USD,BUY,0.25,100,25,filled,0,,\"has, a comma\"");
+    expect(lines[1]).toContain(",ETH-USD,BUY,0.24850895,100,25,0.14910537,filled,0,,\"has, a comma\"");
     expect(await listExports(USER)).toEqual([artifact]);
     expect(await listAudit(USER, { category: "export" })).toHaveLength(1);
+
+    const download = await openExportDownload(USER, artifact.id);
+    if (!download.ok) throw new Error(download.message);
+    expect(download.fileName).toBe(path.basename(artifact.location));
+    expect(await new Response(download.body).text()).toBe(await readFile(artifact.location, "utf8"));
+    expect(await openExportDownload("someone-else", artifact.id)).toMatchObject({ ok: false, status: 404 });
+    expect((await listAudit(USER, { category: "export" })).map((e) => e.action).sort()).toEqual(["created", "downloaded"]);
   });
 });

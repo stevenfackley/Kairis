@@ -52,22 +52,31 @@ export type RiskContext = {
   dataAgeMs: number;
   maxDataAgeMs: number;
   providerDegraded: boolean;
+  /** Coinbase does not list the product (its market endpoints answered "not found"): blocked, not halted. */
+  unknownProduct?: boolean;
   now: Date;
 };
 
 export type PaperTradeStatus = "filled" | "blocked";
 export type PaperTrade = {
   id: string; userId: string; productId: ProductId; side: Side; baseSize: number; price: number; quoteUsd: number;
+  /** Simulated taker fee in USD; null on blocked rows and on fills recorded before fees were modeled. */
+  feeUsd: number | null;
   status: PaperTradeStatus; realizedPnlUsd: number; note: string; signalId: string | null; riskDecision: RiskDecision | null; createdAt: string;
 };
 
-export type AssistedStatus = "previewed" | "submitted" | "blocked" | "filled" | "cancelled" | "failed" | "expired";
+/** How a market order is sized on Coinbase: dollars for a BUY (quote_size), coins for a SELL (base_size). */
+export type OrderSize = { kind: "quote"; quoteSize: string } | { kind: "base"; baseSize: string };
+
+export type AssistedStatus ="previewed" | "submitted" | "blocked" | "filled" | "cancelled" | "failed" | "expired";
 export type ReconcileState = "pending" | "reconciled" | "error";
 export type AssistedOrder = {
   id: string; userId: string; productId: ProductId; side: Side; quoteUsd: number; status: AssistedStatus; reconcileState: ReconcileState;
   reconciledAt: string | null; provider: "coinbase" | "mock"; detail: string; orderId: string | null; clientOrderId: string | null;
   previewId: string | null; exchangeStatus: string | null; filledSize: number | null; averagePrice: number | null; totalFees: number | null;
   signalId: string | null; riskDecision: RiskDecision | null; createdAt: string; updatedAt: string;
+  /** The exact size previewed; submit sends this, never a re-computed one. */
+  orderSize?: OrderSize | null;
 };
 
 export type AuditCategory = "auth" | "onboarding" | "limits" | "signal" | "risk" | "paper-trade" | "assisted-order" | "exchange" | "export" | "operations" | "auto";
@@ -75,7 +84,7 @@ export type AuditEvent = { id: string; userId: string; category: AuditCategory; 
 
 export type ExchangeConnection = {
   userId: string; provider: "coinbase"; keyId: string; canView: boolean; canTrade: boolean; canTransfer: boolean;
-  portfolioUuid: string | null; validatedAt: string; createdAt: string;
+  portfolioUuid: string | null; portfolioType?: string | null; validatedAt: string; createdAt: string;
 };
 
 export type ExportType = "paper-journal" | "assisted-orders" | "audit-log";

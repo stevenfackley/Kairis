@@ -46,11 +46,15 @@ export async function getLimits(userId: string): Promise<TradingLimits> {
   };
 }
 
-export async function saveLimits(limits: Omit<TradingLimits, "updatedAt">): Promise<TradingLimits> {
+/**
+ * Upserts every limit. `tradingPaused` undefined keeps the stored pause (false for a new row): saving
+ * limits never resumes trading unless the caller asks for it explicitly.
+ */
+export async function saveLimits(limits: Omit<TradingLimits, "updatedAt" | "tradingPaused"> & { tradingPaused?: boolean }): Promise<TradingLimits> {
   const rows = await query<LimitsRow>(
     `insert into trading_limits
        (user_id, max_position_usd, daily_loss_cap_usd, max_trades_per_day, cooldown_minutes, loss_streak_trigger, per_symbol_max_usd, trading_paused, updated_at)
-     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, now())
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, coalesce($8::boolean, false), now())
      on conflict (user_id) do update set
        max_position_usd = excluded.max_position_usd,
        daily_loss_cap_usd = excluded.daily_loss_cap_usd,
@@ -58,7 +62,7 @@ export async function saveLimits(limits: Omit<TradingLimits, "updatedAt">): Prom
        cooldown_minutes = excluded.cooldown_minutes,
        loss_streak_trigger = excluded.loss_streak_trigger,
        per_symbol_max_usd = excluded.per_symbol_max_usd,
-       trading_paused = excluded.trading_paused,
+       trading_paused = coalesce($8::boolean, trading_limits.trading_paused),
        updated_at = now()
      returning ${COLUMNS}`,
     [
@@ -69,7 +73,7 @@ export async function saveLimits(limits: Omit<TradingLimits, "updatedAt">): Prom
       limits.cooldownMinutes,
       limits.lossStreakTrigger,
       JSON.stringify(limits.perSymbolMaxUsd),
-      limits.tradingPaused
+      limits.tradingPaused ?? null
     ]
   );
   return mapLimits(rows[0]);

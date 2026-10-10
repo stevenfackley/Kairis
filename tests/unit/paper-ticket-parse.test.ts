@@ -26,6 +26,17 @@ describe("parseOrderForm", () => {
     });
   });
 
+  it("reads a sell-entire-position ticket: side SELL, no dollar size needed", () => {
+    expect(parseOrderForm(form({ product: "SOL-USD", intent: "sell-all", quoteUsd: "" }), WATCHLIST)).toEqual({
+      ok: true,
+      intent: { productId: "SOL-USD", side: "SELL", quoteUsd: 0, note: "", signalId: null, sellAll: true }
+    });
+    expect(parseOrderForm(form({ product: "SOL-USD", side: "BUY", intent: "sell-all", quoteUsd: "abc" }), WATCHLIST)).toMatchObject({
+      ok: true,
+      intent: { side: "SELL", sellAll: true }
+    });
+  });
+
   it("defaults the note to empty and the signal to null", () => {
     expect(parseOrderForm(form(valid), WATCHLIST)).toEqual({
       ok: true,

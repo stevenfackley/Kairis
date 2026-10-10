@@ -57,7 +57,7 @@ The integration tests truncate every table. They only run against a localhost `D
 | `trading_limits` | `user_id` | max position, daily loss cap, trades per day, cooldown, loss streak trigger, per-symbol caps (jsonb), pause flag |
 | `exchange_connections` | `user_id` | Coinbase key name, sealed private key (ciphertext, iv, tag), permission flags, validation time |
 | `signals` | `id` | every signal evaluation: action, setup, rationale (jsonb), strength, indicators, data age |
-| `paper_trades` | `id` | paper fills and blocked attempts, quote size, realized P&L, risk decision (jsonb) |
+| `paper_trades` | `id` | paper fills and blocked attempts, quote size, simulated taker fee (`fee_usd`, null before fees were modeled), realized P&L net of fees, risk decision (jsonb) |
 | `assisted_orders` | `id`, also the exchange `client_order_id` | assisted orders: status, exchange order id and status, fills, fees, risk decision |
 | `audit_events` | `id` | decisions and actions by category (auth, onboarding, limits, signal, risk, paper-trade, assisted-order, exchange, export, operations, auto) |
 | `export_artifacts` | `id` | CSV exports (paper journal, assisted orders, audit log) and where each is stored |

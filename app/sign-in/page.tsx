@@ -7,12 +7,22 @@ import { signInAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
+/** Plain-words copy for the error codes Auth.js sends back to the sign-in page. */
+function signInErrorMessage(code: string | undefined): string | null {
+  if (!code) return null;
+  if (code === "AccessDenied") return "Sign-in was declined, so no session was started. Try again, or contact support if it keeps happening.";
+  if (code === "Configuration") return "Sign-in is not available right now. Try again in a few minutes.";
+  return "Sign-in did not complete. Try again.";
+}
+
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function SignInPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const raw = params.callbackUrl;
   const callbackUrl = safeCallbackUrl(typeof raw === "string" ? raw : undefined);
+  const rawError = params.error;
+  const errorMessage = signInErrorMessage(typeof rawError === "string" ? rawError : undefined);
   const session = await auth();
   if (session?.user) redirect(callbackUrl);
 
@@ -30,6 +40,11 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
           New here? You start in paper mode. Nothing reaches an exchange until you connect a trade-only key and approve an
           order yourself.
         </p>
+        {errorMessage ? (
+          <p className="error-copy" role="alert">
+            {errorMessage}
+          </p>
+        ) : null}
         <form action={signInAction}>
           <input type="hidden" name="callbackUrl" value={callbackUrl} />
           <button type="submit" className="cta-primary button-reset">Continue with Qavren ID</button>

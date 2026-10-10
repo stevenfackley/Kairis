@@ -50,7 +50,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
         <div className="panel-heading">
           <h2 id="filter-heading">Filter</h2>
           <Link className="inline-link" href="/app/reports">
-            Export this log
+            Export the full audit log (Reports)
           </Link>
         </div>
         <form method="get" className="form-grid">

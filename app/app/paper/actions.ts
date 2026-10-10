@@ -17,8 +17,8 @@ export async function placePaperOrderAction(_prev: PaperTicketState, formData: F
     return { error: parsed.error, result: null };
   }
   try {
-    const { productId, side, quoteUsd, note, signalId } = parsed.intent;
-    const { trade, decision } = await placePaperOrder(user.id, { productId, side, quoteUsd, note, signalId });
+    const { productId, side, quoteUsd, note, signalId, sellAll } = parsed.intent;
+    const { trade, decision } = await placePaperOrder(user.id, { productId, side, quoteUsd, note, signalId, sellAll: sellAll === true });
     revalidatePath("/app/paper");
     revalidatePath("/app");
     return { error: null, result: { trade, decision } };

@@ -4,13 +4,32 @@ import type { Candle, SignalEvaluation, Ticker } from "@/lib/types";
 
 const round = (n: number, dp: number) => Number(n.toFixed(dp));
 
-export function suggestedQuoteUsd(limits: { dailyLossCapUsd: number; maxPositionUsd: number }, atrPct: number | null): number {
-  if (!atrPct || atrPct <= 0) return 0;
+type SizingLimits = { dailyLossCapUsd: number; maxPositionUsd: number; perSymbolMaxUsd?: Record<string, number> };
+
+/**
+ * A quarter of the daily loss cap divided by ATR %, capped at the max position and at the product's
+ * per-symbol cap, rounded down to whole cents. What is already held still counts at order time.
+ */
+export function suggestedQuoteUsd(limits: SizingLimits, atrPct: number | null, productId?: string): number {
+  if (!atrPct || !Number.isFinite(atrPct) || atrPct <= 0) return 0;
   const budget = limits.dailyLossCapUsd * STRATEGY.riskBudgetFraction;
-  return round(Math.min(limits.maxPositionUsd, budget / (atrPct / 100)), 2);
+  const cap = productId === undefined ? undefined : limits.perSymbolMaxUsd?.[productId];
+  const size = Math.min(limits.maxPositionUsd, cap ?? Number.POSITIVE_INFINITY, budget / (atrPct / 100));
+  return Number.isFinite(size) && size > 0 ? Math.floor(round(size * 100, 6)) / 100 : 0;
 }
 
-export function evaluateSignal(productId: string, candles: Candle[], ticker: Ticker, nowMs: number): SignalEvaluation {
+/**
+ * Candles in time order with the one still forming left out. Coinbase returns the current hour's candle
+ * while it is open; its close is just the latest trade, so indicators built on it would change all hour
+ * long. Signals (and auto-mode exits) use completed candles only.
+ */
+export function completedCandles(candles: ReadonlyArray<Candle>, nowMs: number): Candle[] {
+  const span = STRATEGY.candleSeconds;
+  return [...candles].sort((a, b) => a.start - b.start).filter((c) => (c.start + span) * 1000 <= nowMs);
+}
+
+export function evaluateSignal(productId: string, rawCandles: Candle[], ticker: Ticker, nowMs: number): SignalEvaluation {
+  const candles = completedCandles(rawCandles, nowMs);
   const evaluatedAt = new Date(nowMs).toISOString();
   const dataAgeMs = Math.max(0, nowMs - ticker.tradeTime);
   const spreadPct = ticker.bestBid > 0 ? round(((ticker.bestAsk - ticker.bestBid) / ticker.bestBid) * 100, 4) : null;
@@ -21,14 +40,15 @@ export function evaluateSignal(productId: string, candles: Candle[], ticker: Tic
 
   if (dataAgeMs > STRATEGY.maxTickerAgeMs) return blocked("Stale data", [`Ticker is ${Math.round(dataAgeMs / 60000)} min old; stale market data fails closed.`]);
   const need = Math.max(STRATEGY.emaSlow + STRATEGY.crossLookback, STRATEGY.rsiPeriod + 1, STRATEGY.atrPeriod);
-  if (candles.length < need) return blocked("Insufficient data", [`Only ${candles.length} candles; ${need} needed.`]);
+  if (candles.length < need) return blocked("Insufficient data", [`Only ${candles.length} completed candles; ${need} needed.`]);
   const last = candles[candles.length - 1]!;
   const candleAgeMs = nowMs - last.start * 1000;
   if (candleAgeMs > STRATEGY.maxCandleAgeMs) return blocked("Stale data", [`Last candle started ${Math.round(candleAgeMs / 3600000)} h ago; stale market data fails closed.`]);
 
   const closes = candles.map((c) => c.close);
   const atrAbs = atr(candles, STRATEGY.atrPeriod);
-  const atrPct = atrAbs ? round((atrAbs / last.close) * 100, 4) : null;
+  const atrRaw = atrAbs !== null && last.close > 0 ? (atrAbs / last.close) * 100 : null;
+  const atrPct = atrRaw !== null && Number.isFinite(atrRaw) ? round(atrRaw, 4) : null;
   const rsiNow = rsi(closes, STRATEGY.rsiPeriod);
   const rsiRounded = rsiNow === null ? null : round(rsiNow, 2);
 

@@ -34,6 +34,12 @@ export async function insertExport(artifact: ExportArtifact): Promise<ExportArti
   return mapExport(rows[0]);
 }
 
+/** The export only when it belongs to `userId`; null otherwise (missing and foreign look the same). */
+export async function getExport(id: string, userId: string): Promise<ExportArtifact | null> {
+  const rows = await query<ExportArtifactRow>(`select ${COLUMNS} from export_artifacts where id = $1 and user_id = $2`, [id, userId]);
+  return rows[0] ? mapExport(rows[0]) : null;
+}
+
 export async function listExports(userId: string): Promise<ExportArtifact[]> {
   const rows = await query<ExportArtifactRow>(
     `select ${COLUMNS} from export_artifacts where user_id = $1 order by created_at desc limit 200`,

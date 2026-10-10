@@ -38,7 +38,8 @@ cycle. `requireOwner()` answers non-owners with a 404 rather than a redirect.
 
 `proxy.ts` matches `/app/:path*`. Without a session it redirects to `/sign-in?...` with the original path
 as the callback. The landing page, `/sign-in` and the API routes are public; `/api/health` and
-`/api/system/status` do not need a session. Server code uses `requireUser()` or `requireOwner()` from
+`/api/system/status` do not need a session, but the status endpoint returns its full configuration
+report only to the owner (everyone else sees just whether the database answers). Server code uses `requireUser()` or `requireOwner()` from
 `lib/server/session.ts`, so the gate does not rest on the proxy alone. After sign-in the user returns to
 the callback path (same-origin paths only, default `/app`).
 

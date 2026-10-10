@@ -10,7 +10,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Plain decimal only: no exponent, hex, Infinity or thousands separators.
 const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 
-export type OrderFormIntent = { productId: string; side: Side; quoteUsd: number; note: string; signalId: string | null };
+/** `sellAll` (the ticket's "Sell entire position" button): sell the whole held size; `quoteUsd` is then set from the position. */
+export type OrderFormIntent = { productId: string; side: Side; quoteUsd: number; note: string; signalId: string | null; sellAll?: true };
+/** The submit button value that asks to close the whole position. */
+export const SELL_ALL_INTENT = "sell-all";
 export type OrderFormResult = { ok: true; intent: OrderFormIntent } | { ok: false; error: string };
 
 /** A form field as trimmed text; files and missing fields read as "". */
@@ -54,6 +57,18 @@ export function parseOrderForm(formData: FormData, watchlist: readonly string[])
     return { ok: false, error: "That product is not on the watchlist. Choose Custom to type another one." };
   }
 
+  const note = text(formData, "note");
+  if (note.length > MAX_NOTE_LENGTH) {
+    return { ok: false, error: `Keep the note to ${MAX_NOTE_LENGTH} characters or fewer (it has ${note.length}).` };
+  }
+  // signal_id is a uuid column: a tampered or truncated id is dropped rather than failing the order.
+  const signalText = text(formData, "signalId");
+  const signalId = isUuid(signalText) ? signalText : null;
+
+  if (text(formData, "intent") === SELL_ALL_INTENT) {
+    return { ok: true, intent: { productId, side: "SELL", quoteUsd: 0, note, signalId, sellAll: true } };
+  }
+
   const sideText = text(formData, "side").toUpperCase();
   if (sideText !== "BUY" && sideText !== "SELL") return { ok: false, error: "Choose buy or sell." };
   const side: Side = sideText;
@@ -68,12 +83,5 @@ export function parseOrderForm(formData: FormData, watchlist: readonly string[])
   if (decimals(raw) > 2) return { ok: false, error: "Order size can have at most two decimal places (whole cents)." };
   if (quoteUsd > MAX_TICKET_USD) return { ok: false, error: "Order size is capped at $1,000,000 per ticket." };
 
-  const note = text(formData, "note");
-  if (note.length > MAX_NOTE_LENGTH) {
-    return { ok: false, error: `Keep the note to ${MAX_NOTE_LENGTH} characters or fewer (it has ${note.length}).` };
-  }
-
-  // signal_id is a uuid column: a tampered or truncated id is dropped rather than failing the order.
-  const signalText = text(formData, "signalId");
-  return { ok: true, intent: { productId, side, quoteUsd, note, signalId: isUuid(signalText) ? signalText : null } };
+  return { ok: true, intent: { productId, side, quoteUsd, note, signalId } };
 }

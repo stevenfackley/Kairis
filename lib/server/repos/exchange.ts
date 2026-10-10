@@ -16,12 +16,13 @@ type ExchangeConnectionRow = {
   can_trade: boolean;
   can_transfer: boolean;
   portfolio_uuid: string | null;
+  portfolio_type: string | null;
   validated_at: Timestamp;
   created_at: Timestamp;
 };
 
 const COLUMNS =
-  "user_id, provider, key_id, secret_ciphertext, secret_iv, secret_tag, can_view, can_trade, can_transfer, portfolio_uuid, validated_at, created_at";
+  "user_id, provider, key_id, secret_ciphertext, secret_iv, secret_tag, can_view, can_trade, can_transfer, portfolio_uuid, portfolio_type, validated_at, created_at";
 
 function mapConnection(row: ExchangeConnectionRow): ExchangeConnection {
   return {
@@ -32,6 +33,7 @@ function mapConnection(row: ExchangeConnectionRow): ExchangeConnection {
     canTrade: row.can_trade,
     canTransfer: row.can_transfer,
     portfolioUuid: row.portfolio_uuid,
+    portfolioType: row.portfolio_type,
     validatedAt: toIso(row.validated_at),
     createdAt: toIso(row.created_at)
   };
@@ -50,8 +52,8 @@ export async function getConnection(userId: string): Promise<StoredExchangeConne
 export async function saveConnection(input: StoredExchangeConnection): Promise<ExchangeConnection> {
   const rows = await query<ExchangeConnectionRow>(
     `insert into exchange_connections
-       (user_id, provider, key_id, secret_ciphertext, secret_iv, secret_tag, can_view, can_trade, can_transfer, portfolio_uuid, validated_at, created_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12::timestamptz, now()))
+       (user_id, provider, key_id, secret_ciphertext, secret_iv, secret_tag, can_view, can_trade, can_transfer, portfolio_uuid, portfolio_type, validated_at, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, coalesce($13::timestamptz, now()))
      on conflict (user_id) do update set
        provider = excluded.provider,
        key_id = excluded.key_id,
@@ -62,6 +64,7 @@ export async function saveConnection(input: StoredExchangeConnection): Promise<E
        can_trade = excluded.can_trade,
        can_transfer = excluded.can_transfer,
        portfolio_uuid = excluded.portfolio_uuid,
+       portfolio_type = excluded.portfolio_type,
        validated_at = excluded.validated_at
      returning ${COLUMNS}`,
     [
@@ -75,6 +78,7 @@ export async function saveConnection(input: StoredExchangeConnection): Promise<E
       input.canTrade,
       input.canTransfer,
       input.portfolioUuid,
+      input.portfolioType ?? null,
       input.validatedAt,
       emptyToNull(input.createdAt)
     ]

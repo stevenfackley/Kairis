@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLimitsForm } from "@/lib/domain/limits-form";
+import { parseLimitsForm, parsePreferredMode } from "@/lib/domain/limits-form";
 
 type Entries = Array<[string, string]>;
 
@@ -27,46 +27,74 @@ function errorOf(entries: Entries): string {
   return result.error;
 }
 
+describe("parsePreferredMode", () => {
+  it("accepts paper, manual and assisted only", () => {
+    for (const mode of ["paper", "manual", "assisted"]) {
+      expect(parsePreferredMode(form([["preferredMode", mode]]))).toEqual({ ok: true, mode });
+    }
+    for (const entries of [[["preferredMode", "auto"]], [["preferredMode", "PAPER"]], []] as Entries[]) {
+      expect(parsePreferredMode(form(entries))).toEqual({ ok: false, error: "Choose a preferred mode: paper, manual or assisted." });
+    }
+  });
+});
+
 describe("parseLimitsForm", () => {
-  it("parses every limit, trimmed and rounded to cents, with no caps and the pause off", () => {
-    expect(parseLimitsForm(form([...withField("maxPositionUsd", " 1500.004 ")]))).toEqual({
+  it("parses every limit, trimmed, with no caps and the pause left as stored", () => {
+    expect(parseLimitsForm(form([...withField("maxPositionUsd", " 1500.25 ")]))).toEqual({
       ok: true,
       limits: {
-        maxPositionUsd: 1500,
+        maxPositionUsd: 1500.25,
         dailyLossCapUsd: 300,
         maxTradesPerDay: 6,
         cooldownMinutes: 20,
         lossStreakTrigger: 2,
         perSymbolMaxUsd: {},
-        tradingPaused: false
+        tradingPaused: undefined
       }
     });
   });
 
-  it("reads the pause checkbox as on for on/true/yes and off otherwise", () => {
+  it("reads the pause checkbox as on for on/true/yes", () => {
     for (const value of ["on", "true", "YES"]) {
       expect(parseLimitsForm(form([...VALID, ["tradingPaused", value]]))).toMatchObject({ ok: true, limits: { tradingPaused: true } });
     }
-    expect(parseLimitsForm(form([...VALID, ["tradingPaused", "false"]]))).toMatchObject({ ok: true, limits: { tradingPaused: false } });
+  });
+
+  it("changes the pause only when the checkbox differs from what the form was rendered with", () => {
+    const paused = (entries: Entries) => {
+      const result = parseLimitsForm(form([...VALID, ...entries]));
+      if (!result.ok) throw new Error(result.error);
+      return result.limits.tradingPaused;
+    };
+    // Rendered paused, box still ticked: keep whatever is stored now (a resume elsewhere wins).
+    expect(paused([["pausedWas", "true"], ["tradingPaused", "on"]])).toBeUndefined();
+    // Rendered active, box still clear: a pause set elsewhere since then must survive the save.
+    expect(paused([["pausedWas", "false"]])).toBeUndefined();
+    // Deliberate toggles apply.
+    expect(paused([["pausedWas", "true"]])).toBe(false);
+    expect(paused([["pausedWas", "false"], ["tradingPaused", "on"]])).toBe(true);
+    // Without the rendered state, never resume; pausing is always safe.
+    expect(paused([["tradingPaused", "false"]])).toBeUndefined();
+    expect(paused([])).toBeUndefined();
   });
 
   it("lets the daily loss cap exceed the max position (they are independent)", () => {
     expect(parseLimitsForm(form(withField("dailyLossCapUsd", "5000")))).toMatchObject({ ok: true, limits: { dailyLossCapUsd: 5000 } });
   });
 
-  it("parses per-symbol caps: upper-cases products, rounds cents, ignores blank rows, allows a cap equal to the max position", () => {
+  it("parses per-symbol caps: upper-cases products, ignores blank rows, allows a cap equal to the max position", () => {
     const result = parseLimitsForm(
       form([
         ...VALID,
         ["capProduct", " sol-usd "],
-        ["capUsd", "200.456"],
+        ["capUsd", "200.45"],
         ["capProduct", ""],
         ["capUsd", "  "],
         ["capProduct", "BTC-USD"],
         ["capUsd", "1500"]
       ])
     );
-    expect(result).toMatchObject({ ok: true, limits: { perSymbolMaxUsd: { "SOL-USD": 200.46, "BTC-USD": 1500 } } });
+    expect(result).toMatchObject({ ok: true, limits: { perSymbolMaxUsd: { "SOL-USD": 200.45, "BTC-USD": 1500 } } });
   });
 
   it("pairs caps by position even when the lists differ in length", () => {
@@ -90,7 +118,11 @@ describe("parseLimitsForm", () => {
     ["cooldownMinutes", "10081", "Cooldown minutes must be at most 10,080."],
     ["lossStreakTrigger", "0", "Loss streak trigger must be greater than 0."],
     ["lossStreakTrigger", "2.5", "Loss streak trigger must be a whole number."],
-    ["lossStreakTrigger", "101", "Loss streak trigger must be at most 100."]
+    ["lossStreakTrigger", "101", "Loss streak trigger must be at most 100."],
+    ["maxPositionUsd", "1500.004", "Max position can have at most two decimal places (whole cents)."],
+    ["dailyLossCapUsd", "1e3", "Daily loss cap must be a plain number, such as 300 or 250.50."],
+    ["maxPositionUsd", "0x10", "Max position must be a plain number, such as 300 or 250.50."],
+    ["maxTradesPerDay", "1e1", "Max trades per day must be a plain number, such as 300 or 250.50."]
   ])("rejects %s = %j", (name, value, message) => {
     expect(errorOf(withField(name, value))).toBe(message);
   });
@@ -105,6 +137,7 @@ describe("parseLimitsForm", () => {
     [[["capProduct", "SOL-USD"], ["capUsd", "0"]], "The SOL-USD cap must be greater than 0."],
     [[["capProduct", "SOL-USD"], ["capUsd", "lots"]], "The SOL-USD cap must be a number."],
     [[["capProduct", "SOL-USD"], ["capUsd", "1500.01"]], "The SOL-USD cap cannot be larger than the max position."],
+    [[["capProduct", "SOL-USD"], ["capUsd", "200.456"]], "The SOL-USD cap can have at most two decimal places (whole cents)."],
     [
       [["capProduct", "ETH-USD"], ["capUsd", "100"], ["capProduct", "eth-usd"], ["capUsd", "50"]],
       "ETH-USD has more than one cap. Keep one row per product."

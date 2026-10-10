@@ -4,27 +4,35 @@ import { startTransition, useActionState, useState, type FormEvent } from "react
 import { placePaperOrderAction } from "@/app/app/paper/actions";
 import { INITIAL_PAPER_TICKET_STATE, type PaperTicketState } from "@/app/app/paper/state";
 import { RiskDecisionView } from "@/components/risk-decision";
-import { CUSTOM_PRODUCT, MAX_NOTE_LENGTH, MAX_TICKET_USD } from "@/lib/domain/order-form";
+import { CUSTOM_PRODUCT, MAX_NOTE_LENGTH, MAX_TICKET_USD, SELL_ALL_INTENT } from "@/lib/domain/order-form";
+import { usdPrice } from "@/lib/domain/money";
 import { num, usd } from "@/lib/format";
 
 type PaperTicketProps = {
   defaults: { productId?: string; quoteUsd?: number; signalId?: string };
   watchlist: readonly string[];
+  /** Held base size per product, for the "Sell entire position" button. */
+  holdings: Record<string, number>;
 };
 
 type Result = NonNullable<PaperTicketState["result"]>;
 
+/** Coinbase semantics: a buy's dollars include the fee; a sell's fee comes out of the proceeds. */
 function resultLine({ trade, decision }: Result): string {
   if (trade.status === "filled") {
-    const verb = trade.side === "BUY" ? "bought" : "sold";
-    const pnl = trade.side === "SELL" ? ` Realized ${usd(trade.realizedPnlUsd)}.` : "";
-    return `Filled: ${verb} ${num(trade.baseSize, 8)} ${trade.productId} at ${usd(trade.price)}.${pnl}`;
+    const fee = trade.feeUsd ?? 0;
+    const filledValue = trade.baseSize * trade.price;
+    const coins = `${num(trade.baseSize, 8)} ${trade.productId.split("-")[0]} at ${usdPrice(trade.price)}`;
+    if (trade.side === "BUY") {
+      return `Filled: bought ${coins} for ${usd(filledValue + fee)}, including the ${usd(fee)} fee.`;
+    }
+    return `Filled: sold ${coins} for ${usd(filledValue - fee)} after the ${usd(fee)} fee. Realized ${usd(trade.realizedPnlUsd)} after fees.`;
   }
   const label = decision.outcome === "halted" ? "Halted" : "Blocked";
   return `${label}: ${decision.reasons[0] ?? "a risk check failed."} Nothing was filled; the attempt is in your journal.`;
 }
 
-export function PaperTicket({ defaults, watchlist }: PaperTicketProps) {
+export function PaperTicket({ defaults, watchlist, holdings }: PaperTicketProps) {
   const [state, formAction, pending] = useActionState(placePaperOrderAction, INITIAL_PAPER_TICKET_STATE);
   const preset = defaults.productId;
   const [choice, setChoice] = useState(() =>
@@ -38,13 +46,16 @@ export function PaperTicket({ defaults, watchlist }: PaperTicketProps) {
   const productId = choice === CUSTOM_PRODUCT ? customProduct.trim().toUpperCase() : choice;
   // The signal link only describes the product it was opened for; switching product drops it.
   const signalId = defaults.signalId && productId === preset ? defaults.signalId : "";
+  const heldSize = holdings[productId];
 
   // Dispatch manually so React does not auto-reset the form after the action: the fields are
   // controlled, and a DOM reset would desync the product select from state. Before hydration the
   // form still posts through `action`.
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    // The submitter carries intent=sell-all when "Sell entire position" was pressed.
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const formData = new FormData(event.currentTarget, submitter instanceof HTMLButtonElement ? submitter : null);
     startTransition(() => formAction(formData));
   }
 
@@ -108,7 +119,10 @@ export function PaperTicket({ defaults, watchlist }: PaperTicketProps) {
             onChange={(e) => setQuoteUsd(e.target.value)}
             required
           />
-          <span className="field-help">A sell is sized in dollars too, up to what you hold.</span>
+          <span className="field-help">
+            A sell is sized in dollars too, up to what you hold. To close a position exactly, use Sell entire position.
+            Coinbase&apos;s minimums and increments for the product apply, as they do live.
+          </span>
         </label>
 
         <label className="field paper-ticket-note">
@@ -124,6 +138,17 @@ export function PaperTicket({ defaults, watchlist }: PaperTicketProps) {
         <div className="button-row paper-ticket-submit">
           <button type="submit" className="cta-primary button-reset" disabled={pending}>
             {pending ? "Checking limits..." : "Place paper order"}
+          </button>
+          <button
+            type="submit"
+            name="intent"
+            value={SELL_ALL_INTENT}
+            formNoValidate
+            className="cta-secondary button-reset"
+            disabled={pending || heldSize === undefined}
+            title={heldSize === undefined ? `You hold no ${productId || "position"} in paper.` : undefined}
+          >
+            {heldSize === undefined ? "Sell entire position" : `Sell entire position (${num(heldSize, 8)} ${productId.split("-")[0]})`}
           </button>
           <span className="field-help">
             {signalId ? "Linked to the signal you opened. " : ""}

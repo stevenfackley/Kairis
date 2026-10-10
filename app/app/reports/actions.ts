@@ -13,17 +13,18 @@ export async function createExportAction(formData: FormData): Promise<void> {
   const user = await requireOnboarded("/app/reports");
   const raw = formData.get("type");
   const type = oneOf(typeof raw === "string" ? raw : null, TYPES);
-  let error: string | null = null;
+  let target: string;
   if (!type) {
-    error = "Unknown export type.";
+    target = `/app/reports?error=${encodeURIComponent("Unknown export type.")}`;
   } else {
     try {
-      await createExport(user.id, type);
+      const artifact = await createExport(user.id, type);
+      target = `/app/reports?created=${encodeURIComponent(artifact.id)}`;
     } catch (e) {
-      error = e instanceof Error ? e.message : "Export failed.";
+      console.error("export failed", e);
+      target = `/app/reports?error=${encodeURIComponent(`The export could not be created: ${e instanceof Error ? e.message : "unknown error."}`)}`;
     }
   }
   revalidatePath("/app/reports");
-  if (error) redirect(`/app/reports?error=${encodeURIComponent(error)}`);
-  redirect("/app/reports");
+  redirect(target);
 }

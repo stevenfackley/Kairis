@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { togglePauseAction } from "@/app/app/actions";
 import { ModeBadge } from "@/components/mode-badge";
+import { PositionsTable } from "@/components/positions-table";
+import { evaluatedAgo, isSignalStale } from "@/components/signal-card";
 import { buildPositions, dayStats } from "@/lib/domain/paper";
 import { env } from "@/lib/env";
-import { num, short, usd, when } from "@/lib/format";
+import { short, usd, when } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { getLimits } from "@/lib/server/repos/limits";
 import { getOnboarding } from "@/lib/server/repos/onboarding";
@@ -49,13 +51,14 @@ export default async function DashboardPage() {
   ]);
   const held = Object.keys(buildPositions(paperTrades, {}));
   const prices = held.length > 0 ? await getReferencePrices(held) : {};
-  const positions = Object.entries(buildPositions(paperTrades, prices));
-  const today = dayStats(paperTrades, new Date());
+  const positions = buildPositions(paperTrades, prices);
+  const now = new Date();
+  const nowMs = now.getTime();
+  const today = dayStats(paperTrades, now);
   const mode: TradeMode = connection && env.liveAssistedTradingEnabled ? "live" : "paper";
   const capCount = Object.keys(limits.perSymbolMaxUsd).length;
   const recentOrders = assistedOrders.slice(0, 5);
   const topSignals = signals.slice(0, 3);
-  const missingMarks = positions.some(([productId]) => prices[productId] === undefined);
 
   return (
     <>
@@ -140,22 +143,22 @@ export default async function DashboardPage() {
       <section className="grid">
         <article className="panel" data-mode="paper">
           <div className="panel-heading">
-            <h2>Today</h2>
+            <h2>Today (UTC)</h2>
             <ModeBadge mode="paper" />
           </div>
           <div className="status-stack">
             <div className="status-row">
-              <span>Trades used (UTC day)</span>
+              <span>Trades used today (UTC)</span>
               <strong>
                 {today.tradesCount} of {limits.maxTradesPerDay}
               </strong>
             </div>
             <div className="status-row">
-              <span>Realized P&amp;L</span>
+              <span>Realized P&amp;L today (UTC)</span>
               <strong>{signedUsd(today.realizedPnlUsd)}</strong>
             </div>
             <div className="status-row">
-              <span>Consecutive losses</span>
+              <span>Consecutive losses (last 24 h)</span>
               <strong>
                 {today.consecutiveLosses} of {limits.lossStreakTrigger} before cooldown
               </strong>
@@ -195,8 +198,13 @@ export default async function DashboardPage() {
                       Suggested size:{" "}
                       {signal.action === "long" && signal.suggestedQuoteUsd > 0 ? usd(signal.suggestedQuoteUsd) : "none"}
                     </span>
-                    <span>{when(signal.evaluatedAt)}</span>
+                    <span>Evaluated {evaluatedAgo(signal.evaluatedAt, nowMs)}</span>
                   </p>
+                  {isSignalStale(signal.evaluatedAt, nowMs) ? (
+                    <p className="error-copy" role="status">
+                      Stale: evaluated {evaluatedAgo(signal.evaluatedAt, nowMs)}. Refresh before acting on it.
+                    </p>
+                  ) : null}
                 </Link>
               ))}
             </div>
@@ -209,42 +217,7 @@ export default async function DashboardPage() {
           <h2>Positions</h2>
           <ModeBadge mode="paper" />
         </div>
-        {positions.length === 0 ? (
-          <p className="empty">No open paper positions. Place a paper trade to see it here.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Product</th>
-                  <th scope="col" className="num">Size</th>
-                  <th scope="col" className="num">Avg cost</th>
-                  <th scope="col" className="num">Mark</th>
-                  <th scope="col" className="num">Notional</th>
-                  <th scope="col" className="num">Unrealized P&amp;L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map(([productId, position]) => {
-                  const mark = prices[productId];
-                  return (
-                    <tr key={productId}>
-                      <td>{productId}</td>
-                      <td className="num">{num(position.baseSize, 8)}</td>
-                      <td className="num">{usd(position.avgCost)}</td>
-                      <td className="num">{mark === undefined ? "n/a" : usd(mark)}</td>
-                      <td className="num">{usd(position.notionalUsd)}</td>
-                      <td className="num">{mark === undefined ? "n/a" : signedUsd((mark - position.avgCost) * position.baseSize)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {missingMarks ? (
-              <p className="field-help">Market data was unavailable for some products; their notional uses the average cost.</p>
-            ) : null}
-          </div>
-        )}
+        <PositionsTable positions={positions} prices={prices} />
       </section>
 
       <section className="panel">

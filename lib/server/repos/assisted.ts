@@ -1,6 +1,7 @@
 import { query } from "@/lib/server/db";
 import {
   emptyToNull,
+  isRecord,
   toIso,
   toIsoOrNull,
   toJsonParam,
@@ -10,7 +11,7 @@ import {
   type Numeric,
   type Timestamp
 } from "@/lib/server/repos/map";
-import type { AssistedOrder, AssistedStatus, ReconcileState, RiskDecision, Side } from "@/lib/types";
+import type { AssistedOrder, AssistedStatus, OrderSize, ReconcileState, RiskDecision, Side } from "@/lib/types";
 
 type AssistedOrderRow = {
   id: string;
@@ -32,6 +33,7 @@ type AssistedOrderRow = {
   total_fees: Numeric | null;
   signal_id: string | null;
   risk_decision: unknown;
+  order_size: unknown;
   created_at: Timestamp;
   updated_at: Timestamp;
 };
@@ -51,10 +53,10 @@ export type AssistedOrderPatch = Partial<
     | "averagePrice"
     | "totalFees"
   >
-> & { riskDecision?: RiskDecision | null };
+> & { riskDecision?: RiskDecision | null; orderSize?: OrderSize | null };
 
 const COLUMNS =
-  "id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, order_id, client_order_id, preview_id, exchange_status, filled_size, average_price, total_fees, signal_id, risk_decision, created_at, updated_at";
+  "id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, order_id, client_order_id, preview_id, exchange_status, filled_size, average_price, total_fees, signal_id, risk_decision, order_size, created_at, updated_at";
 
 // Fixed key -> column map: only these identifiers ever reach the dynamic SET list.
 const PATCH_COLUMNS: { [K in keyof Required<AssistedOrderPatch>]: string } = {
@@ -69,8 +71,18 @@ const PATCH_COLUMNS: { [K in keyof Required<AssistedOrderPatch>]: string } = {
   filledSize: "filled_size",
   averagePrice: "average_price",
   totalFees: "total_fees",
-  riskDecision: "risk_decision"
+  riskDecision: "risk_decision",
+  orderSize: "order_size"
 };
+
+const JSON_COLUMNS: ReadonlySet<keyof AssistedOrderPatch> = new Set(["riskDecision", "orderSize"]);
+
+function toOrderSize(value: unknown): OrderSize | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === "quote" && typeof value.quoteSize === "string") return { kind: "quote", quoteSize: value.quoteSize };
+  if (value.kind === "base" && typeof value.baseSize === "string") return { kind: "base", baseSize: value.baseSize };
+  return null;
+}
 
 function isPatchKey(key: string): key is keyof AssistedOrderPatch {
   return Object.prototype.hasOwnProperty.call(PATCH_COLUMNS, key);
@@ -97,6 +109,7 @@ function mapAssistedOrder(row: AssistedOrderRow): AssistedOrder {
     totalFees: toNumberOrNull(row.total_fees),
     signalId: row.signal_id,
     riskDecision: toRiskDecision(row.risk_decision),
+    orderSize: toOrderSize(row.order_size),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
   };
@@ -106,9 +119,9 @@ export async function insertAssistedOrder(order: AssistedOrder): Promise<Assiste
   const rows = await query<AssistedOrderRow>(
     `insert into assisted_orders
        (id, user_id, product_id, side, quote_size, status, reconcile_state, reconciled_at, provider, detail, order_id, client_order_id,
-        preview_id, exchange_status, filled_size, average_price, total_fees, signal_id, risk_decision, created_at, updated_at)
+        preview_id, exchange_status, filled_size, average_price, total_fees, signal_id, risk_decision, order_size, created_at, updated_at)
      values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-             $13, $14, $15, $16, $17, $18, $19::jsonb, coalesce($20::timestamptz, now()), now())
+             $13, $14, $15, $16, $17, $18, $19::jsonb, $20::jsonb, coalesce($21::timestamptz, now()), now())
      returning ${COLUMNS}`,
     [
       emptyToNull(order.id),
@@ -130,6 +143,7 @@ export async function insertAssistedOrder(order: AssistedOrder): Promise<Assiste
       order.totalFees,
       order.signalId,
       toJsonParam(order.riskDecision),
+      toJsonParam(order.orderSize),
       emptyToNull(order.createdAt)
     ]
   );
@@ -143,9 +157,9 @@ export async function updateAssistedOrder(id: string, patch: AssistedOrderPatch)
     if (value === undefined || !isPatchKey(key)) {
       continue;
     }
-    if (key === "riskDecision") {
+    if (JSON_COLUMNS.has(key)) {
       params.push(toJsonParam(value));
-      sets.push(`risk_decision = $${params.length}::jsonb`);
+      sets.push(`${PATCH_COLUMNS[key]} = $${params.length}::jsonb`);
       continue;
     }
     params.push(value);
@@ -177,6 +191,18 @@ export async function claimPreviewedOrder(id: string, userId: string): Promise<A
     [id, userId]
   );
   return rows[0] ? mapAssistedOrder(rows[0]) : null;
+}
+
+// Closes previews the user walked away from: never claimed for submit and older than the cutoff.
+export async function expireStalePreviews(userId: string, createdBefore: string, detail: string): Promise<number> {
+  const rows = await query<{ id: string }>(
+    `update assisted_orders
+        set status = 'expired', reconcile_state = 'reconciled', reconciled_at = now(), detail = $3, updated_at = now()
+      where user_id = $1 and status = 'previewed' and submit_claimed_at is null and created_at < $2::timestamptz
+      returning id`,
+    [userId, createdBefore, detail]
+  );
+  return rows.length;
 }
 
 // Frees a claim taken by claimPreviewedOrder when submission failed before reaching the exchange.

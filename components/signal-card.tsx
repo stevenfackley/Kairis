@@ -25,10 +25,26 @@ function ticketHref(path: "/app/paper" | "/app/trade", signal: SignalRecord & { 
   return `${path}?${params.toString()}`;
 }
 
-type SignalCardProps = { signal: SignalRecord & { suggestedQuoteUsd: number }; mode: TradeMode };
+/** "just now", "12 min ago", "3 h ago": how long ago the signal was evaluated. */
+export function evaluatedAgo(evaluatedAt: string, nowMs: number): string {
+  const ms = nowMs - Date.parse(evaluatedAt);
+  if (!Number.isFinite(ms)) return MISSING;
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 120) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)} h ago`;
+}
 
-export function SignalCard({ signal, mode }: SignalCardProps) {
+/** True when the signal is older than the refresh window and should not be acted on. */
+export function isSignalStale(evaluatedAt: string, nowMs: number): boolean {
+  return nowMs - Date.parse(evaluatedAt) > STRATEGY.signalRefreshAfterMs;
+}
+
+type SignalCardProps = { signal: SignalRecord & { suggestedQuoteUsd: number }; mode: TradeMode; nowMs: number };
+
+export function SignalCard({ signal, mode, nowMs }: SignalCardProps) {
   const action = ACTION[signal.action];
+  const stale = isSignalStale(signal.evaluatedAt, nowMs);
   // A failed market fetch is stored with price 0: say "n/a" rather than imply a $0 market.
   const hasMarket = signal.referencePrice > 0;
   const budgetPct = Math.round(STRATEGY.riskBudgetFraction * 100);
@@ -46,6 +62,11 @@ export function SignalCard({ signal, mode }: SignalCardProps) {
       <p className="signal-meta">
         <span>Strength {Math.round(signal.strength * 100)}%</span>
       </p>
+      {stale ? (
+        <p className="error-copy" role="status">
+          Stale: evaluated {evaluatedAgo(signal.evaluatedAt, nowMs)}. Refresh before acting on it.
+        </p>
+      ) : null}
 
       {signal.rationale.length > 0 ? (
         <ul className="signal-rationale" aria-label="Why this signal fired">
@@ -78,7 +99,9 @@ export function SignalCard({ signal, mode }: SignalCardProps) {
         </div>
         <div className="status-row">
           <span>Evaluated</span>
-          <strong>{when(signal.evaluatedAt)}</strong>
+          <strong>
+            {evaluatedAgo(signal.evaluatedAt, nowMs)} ({when(signal.evaluatedAt)})
+          </strong>
         </div>
         <div className="status-row">
           <span>Suggested size for you</span>
@@ -88,7 +111,7 @@ export function SignalCard({ signal, mode }: SignalCardProps) {
 
       <p className="field-help signal-sizing">
         {signal.suggestedQuoteUsd > 0
-          ? `Sized from ${budgetPct}% of your daily loss cap divided by ATR, capped at your max position. Per-symbol caps still apply at order time.`
+          ? `Sized from ${budgetPct}% of your daily loss cap divided by ATR, capped at your max position and any cap you set for ${signal.productId}. What you already hold still counts toward those limits at order time.`
           : "No size suggested until ATR is available."}
       </p>
 

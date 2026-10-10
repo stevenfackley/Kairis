@@ -5,7 +5,8 @@ import type { OrderIntent } from "@/lib/types";
 // Same rules: a watchlist product or a custom XXX-USD product, BUY or SELL, and a USD quote above 0,
 // at most 1,000,000, with no more than 2 decimals.
 
-export type AssistedIntent = Omit<OrderIntent, "mode">;
+/** closePosition: sell the whole recorded position by coin amount; quoteUsd is then worked out by the server. */
+export type AssistedIntent = Omit<OrderIntent, "mode"> & { closePosition: boolean };
 export type AssistedFormResult = { ok: true; intent: AssistedIntent } | { ok: false; error: string };
 
 export const CUSTOM_PRODUCT = "custom";
@@ -42,6 +43,13 @@ export function parseAssistedForm(form: FormData): AssistedFormResult {
   if (!productId) {
     return { ok: false, error: `"${raw}" is not a product such as SOL-USD.` };
   }
+  const signal = text(form, "signalId");
+  const signalId = isUuid(signal) ? signal : null;
+
+  // "Sell entire position": the size is the held coin amount, so the side and dollar fields do not apply.
+  if (text(form, "closePosition") === "yes") {
+    return { ok: true, intent: { productId, side: "SELL", quoteUsd: 0, signalId, closePosition: true } };
+  }
 
   const side = text(form, "side");
   if (side !== "BUY" && side !== "SELL") {
@@ -63,6 +71,5 @@ export function parseAssistedForm(form: FormData): AssistedFormResult {
     return { ok: false, error: "Order size must be at most $1,000,000." };
   }
 
-  const signal = text(form, "signalId");
-  return { ok: true, intent: { productId, side, quoteUsd, signalId: isUuid(signal) ? signal : null } };
+  return { ok: true, intent: { productId, side, quoteUsd, signalId, closePosition: false } };
 }

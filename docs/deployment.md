@@ -138,7 +138,8 @@ then curls the public `/api/health`. To redeploy a ref, run the workflow manuall
 
     curl -s https://kairis.qavrensolutions.com/api/system/status
 
-`database` should read `connected`, `secretKey` `configured`.
+`services.database` should read `connected`. Signed out, the endpoint returns only that; signed in as
+the owner (browser session), it also reports the realm, R2, the secret key and the feature flags.
 
 ### f. Later flips
 
