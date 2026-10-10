@@ -45,6 +45,50 @@ describe("market snapshot cache", () => {
     expect(tick).toHaveBeenCalledTimes(3);
   });
 
+  it("remembers a failed fetch for a few seconds only, then tries again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-09T12:00:00.000Z"));
+    let down = true;
+    const tick = vi.fn(async (productId: string) => {
+      if (down) throw new Error("Coinbase public request failed (503): down");
+      return ticker(productId, 100);
+    });
+    __setMarketFetchers({ candles: async () => [], ticker: tick });
+
+    await expect(getMarketSnapshot("BTC-USD")).rejects.toThrow("(503)");
+    vi.setSystemTime(new Date("2026-10-09T12:00:04.000Z"));
+    await expect(getMarketSnapshot("BTC-USD")).rejects.toThrow("(503)");
+    expect(tick).toHaveBeenCalledTimes(1);
+
+    down = false;
+    vi.setSystemTime(new Date("2026-10-09T12:00:06.000Z"));
+    await expect(getMarketSnapshot("BTC-USD")).resolves.toMatchObject({ ticker: { price: 100 } });
+    expect(tick).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let one product's failure affect another product", async () => {
+    __setMarketFetchers({
+      candles: async () => [],
+      ticker: async (productId) => {
+        if (productId === "SOL-USD") throw new Error("down");
+        return ticker(productId, 5);
+      }
+    });
+    await expect(getMarketSnapshot("SOL-USD")).rejects.toThrow("down");
+    await expect(getMarketSnapshot("ETH-USD")).resolves.toMatchObject({ ticker: { price: 5 } });
+  });
+
+  it("fetches candles and ticker once per refresh for a product", async () => {
+    const candles = vi.fn(async (): Promise<Candle[]> => []);
+    const tick = vi.fn(async (productId: string) => ticker(productId, 100));
+    __setMarketFetchers({ candles, ticker: tick });
+
+    await Promise.all([getMarketSnapshot("BTC-USD"), getReferencePrice("BTC-USD"), getReferencePrices(["BTC-USD"])]);
+
+    expect(candles).toHaveBeenCalledTimes(1);
+    expect(tick).toHaveBeenCalledTimes(1);
+  });
+
   it("shares one in-flight fetch between concurrent callers", async () => {
     const tick = vi.fn(async (productId: string) => ticker(productId, 100));
     __setMarketFetchers({ candles: async () => [], ticker: tick });
