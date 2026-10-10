@@ -94,6 +94,10 @@ export function createMockClient(
         detail: `Mock order accepted for ${input.side} ${input.productId} with ${sized}.`
       };
     },
+    async findOrderByClientId(lookup) {
+      const orderId = byClientId.get(lookup.clientOrderId);
+      return orderId ? (issued.get(orderId) ?? null) : null;
+    },
     async getOrder(orderId) {
       return (
         issued.get(orderId) ?? {

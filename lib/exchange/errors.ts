@@ -133,16 +133,22 @@ function build(code: ExchangeErrorCode, message: string, retriable: boolean, amb
 // Untyped errors (older call sites, tests) still carry "(401)" or "(HTTP 401)"; bare numbers do not count.
 const STATUS_IN_MESSAGE = /\((?:HTTP )?([1-5]\d\d)\)/;
 
+// Matched by name as well as class: a bundler or a test's module reset can load this file twice, and an
+// unrecognised timeout must never be mistaken for a definite refusal.
+function named<T extends Error>(error: unknown, cls: abstract new (...args: never[]) => T, name: string): error is T {
+  return error instanceof cls || (error instanceof Error && error.name === name);
+}
+
 export function normalizeExchangeError(error: unknown): ExchangeError {
-  if (error instanceof ExchangeHttpError) {
+  if (named(error, ExchangeHttpError, "ExchangeHttpError") && typeof error.status === "number") {
     const s = fromStatus(error.status);
     return build(s.code, error.message, s.retriable, s.ambiguous, error.status);
   }
-  if (error instanceof ExchangeTransportError) {
+  if (named(error, ExchangeTransportError, "ExchangeTransportError")) {
     const code = error.kind === "timeout" ? "timeout" : error.kind === "network" ? "network" : "provider_unavailable";
     return build(code, error.message, true, true, null);
   }
-  if (error instanceof CoinbaseKeyFormatError) {
+  if (named(error, CoinbaseKeyFormatError, "CoinbaseKeyFormatError")) {
     return build("key_format", error.message, false, false, null);
   }
   const message = error instanceof Error && error.message ? error.message : "Unknown exchange provider error.";

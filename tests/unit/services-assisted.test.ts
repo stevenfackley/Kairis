@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mapProduct } from "@/lib/exchange/coinbase-public";
+import { ExchangeTransportError, describeHttpFailure } from "@/lib/exchange/errors";
 import { createMockClient } from "@/lib/exchange/mock";
 import type { ExchangeClient, OrderPreview, OrderStatus, ProductRules } from "@/lib/exchange/types";
 import type { AssistedOrder, TradingLimits } from "@/lib/types";
@@ -113,6 +114,7 @@ function fakeClient(provider: "coinbase" | "mock", overrides: Partial<ExchangeCl
     previewOrder: vi.fn(),
     createOrder: vi.fn(),
     getOrder: vi.fn(),
+    findOrderByClientId: vi.fn(async () => null),
     ...overrides
   };
 }
@@ -120,7 +122,9 @@ function fakeClient(provider: "coinbase" | "mock", overrides: Partial<ExchangeCl
 async function load(liveEnabled: boolean) {
   vi.stubEnv("ENABLE_LIVE_ASSISTED_TRADING", liveEnabled ? "true" : "false");
   vi.resetModules();
-  return import("@/lib/server/services/assisted");
+  const mod = await import("@/lib/server/services/assisted");
+  mod.__setSettleDelayMs(0);
+  return mod;
 }
 
 let current: AssistedOrder;
@@ -404,17 +408,114 @@ describe("submitAssisted", () => {
     expect(m.getExchangeClient).not.toHaveBeenCalled();
   });
 
-  it("marks the order failed and rethrows when the exchange call throws", async () => {
+  it("marks the order failed when Coinbase definitely refused the request", async () => {
     const { submitAssisted } = await load(true);
     current = order({ provider: "coinbase" });
     const createOrder = vi.fn(async () => {
-      throw new Error("Coinbase request failed (503): unavailable");
+      throw describeHttpFailure(400, JSON.stringify({ error: "INVALID_ARGUMENT", message: "invalid product_id" }));
     });
     m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
 
-    await expect(submitAssisted(USER, ORDER_ID)).rejects.toThrow("Coinbase request failed (503): unavailable");
-    expect(current).toMatchObject({ status: "failed", reconcileState: "error" });
+    const result = await submitAssisted(USER, ORDER_ID);
+
+    expect(result).toMatchObject({ status: "failed", reconcileState: "error", detail: "Coinbase rejected the request (HTTP 400): invalid product_id." });
     expect(m.releaseSubmitClaim).not.toHaveBeenCalled();
+  });
+
+  it("records a Coinbase rejection with its reason in words", async () => {
+    const { submitAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const detail = "Coinbase rejected the order. Not enough funds in the Coinbase account for this order. (INSUFFICIENT_FUND)";
+    const createOrder = vi.fn(async () => ({ success: false, orderId: null, clientOrderId: ORDER_ID, failureReason: "INSUFFICIENT_FUND", detail }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
+
+    expect(await submitAssisted(USER, ORDER_ID)).toMatchObject({ status: "failed", orderId: null, detail });
+  });
+
+  it("settles an IOC fill right after submit instead of leaving the order 'submitted'", async () => {
+    const { submitAssisted, settleAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-9", clientOrderId: ORDER_ID, failureReason: null, detail: "Coinbase accepted the order." }));
+    const getOrder = vi.fn(async (): Promise<OrderStatus> => ({ orderId: "cb-9", status: "FILLED", filledSize: 0.00198807, averagePrice: 50000, totalFees: 0.59642147, raw: "FILLED" }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder, getOrder }));
+
+    const submitted = await submitAssisted(USER, ORDER_ID);
+    expect(submitted).toMatchObject({ status: "submitted", orderId: "cb-9" });
+    expect(getOrder).not.toHaveBeenCalled();
+    const result = await settleAssisted(USER, submitted);
+
+    expect(getOrder).toHaveBeenCalledWith("cb-9");
+    expect(result).toMatchObject({ status: "filled", orderId: "cb-9", reconcileState: "reconciled", filledSize: 0.00198807, totalFees: 0.59642147 });
+    expect(result.detail).toBe("Filled 0.00198807 BTC at an average $50,000.00, fees $0.60.");
+    const actions = m.appendAudit.mock.calls.filter((c) => c[1] === "assisted-order").map((c) => c[2]);
+    expect(actions).toEqual(["submitted", "filled"]);
+  });
+
+  it("leaves the order submitted when Coinbase has not reported the fill yet", async () => {
+    const { submitAssisted, settleAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-10", clientOrderId: ORDER_ID, failureReason: null, detail: "Coinbase accepted the order." }));
+    const getOrder = vi.fn(async (): Promise<OrderStatus> => ({ orderId: "cb-10", status: "PENDING", filledSize: 0, averagePrice: null, totalFees: 0, raw: "PENDING" }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder, getOrder }));
+
+    const result = await settleAssisted(USER, await submitAssisted(USER, ORDER_ID));
+
+    expect(getOrder).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ status: "submitted", orderId: "cb-10", reconcileState: "pending", exchangeStatus: "PENDING" });
+  });
+
+  it("keeps a timed-out submit as unconfirmed and finds it by client order id", async () => {
+    const { submitAssisted, settleAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const createOrder = vi.fn(async () => {
+      throw new ExchangeTransportError("timeout", "Coinbase did not answer within 10 s.");
+    });
+    const findOrderByClientId = vi.fn(async (): Promise<OrderStatus> => ({ orderId: "cb-11", status: "FILLED", filledSize: 0.002, averagePrice: 50000, totalFees: 0.6, raw: "FILLED" }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder, findOrderByClientId }));
+
+    const unconfirmed = await submitAssisted(USER, ORDER_ID);
+    expect(unconfirmed).toMatchObject({ status: "submitted", orderId: null, reconcileState: "pending" });
+    const result = await settleAssisted(USER, unconfirmed);
+
+    expect(findOrderByClientId).toHaveBeenCalledWith(expect.objectContaining({ clientOrderId: ORDER_ID, productId: "BTC-USD", side: "BUY" }));
+    expect(result).toMatchObject({ status: "filled", orderId: "cb-11", clientOrderId: ORDER_ID });
+    expect(createOrder).toHaveBeenCalledOnce();
+  });
+
+  it("never marks an unanswered submit failed: it stays submitted, counted as exposure, for reconcile to resolve", async () => {
+    const { submitAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const createOrder = vi.fn(async () => {
+      throw describeHttpFailure(503, "");
+    });
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
+
+    const result = await submitAssisted(USER, ORDER_ID);
+
+    expect(result).toMatchObject({ status: "submitted", orderId: null, clientOrderId: ORDER_ID, reconcileState: "pending" });
+    expect(result.detail).toBe(
+      "Coinbase did not confirm the order (Coinbase is not responding normally (HTTP 503).) It may have been placed; Reconcile looks it up by its client order id."
+    );
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "assisted-order", "unconfirmed", expect.any(String));
+  });
+
+  it("treats DUPLICATE_CLIENT_ORDER_ID as an order already placed and looks it up", async () => {
+    const { submitAssisted, settleAssisted } = await load(true);
+    current = order({ provider: "coinbase" });
+    const createOrder = vi.fn(async () => ({ success: false, orderId: null, clientOrderId: ORDER_ID, failureReason: "DUPLICATE_CLIENT_ORDER_ID", detail: "x" }));
+    const findOrderByClientId = vi.fn(async (): Promise<OrderStatus> => ({ orderId: "cb-12", status: "FILLED", filledSize: 0.002, averagePrice: 50000, totalFees: 0.6, raw: "FILLED" }));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder, findOrderByClientId }));
+
+    expect(await settleAssisted(USER, await submitAssisted(USER, ORDER_ID))).toMatchObject({ status: "filled", orderId: "cb-12" });
+  });
+
+  it("settleAssisted leaves anything but a pending submitted order alone and never throws", async () => {
+    const { settleAssisted } = await load(true);
+    const blocked = order({ status: "blocked" });
+    expect(await settleAssisted(USER, blocked)).toBe(blocked);
+    m.getExchangeClient.mockRejectedValue(new Error("decrypt failed"));
+    const pending = order({ status: "submitted", provider: "coinbase", orderId: "cb-x" });
+    expect(await settleAssisted(USER, pending)).toBe(pending);
   });
 
   it("releases the claim when the risk check throws before the exchange, so the order can be resubmitted", async () => {
@@ -438,14 +539,16 @@ describe("reconcileAssisted", () => {
     "o-filled": { orderId: "o-filled", status: "FILLED", filledSize: 0.002, averagePrice: PRICE, totalFees: 0.6, raw: "FILLED" },
     "o-cancelled": { orderId: "o-cancelled", status: "CANCELLED", filledSize: 0, averagePrice: null, totalFees: 0, raw: "CANCELLED" },
     "o-open": { orderId: "o-open", status: "OPEN", filledSize: 0, averagePrice: null, totalFees: 0, raw: "OPEN" },
-    "o-unknown": { orderId: "o-unknown", status: "UNKNOWN", filledSize: null, averagePrice: null, totalFees: null, raw: "WEIRD" }
+    "o-unknown": { orderId: "o-unknown", status: "UNKNOWN", filledSize: null, averagePrice: null, totalFees: null, raw: "WEIRD" },
+    "o-partial": { orderId: "o-partial", status: "CANCELLED", filledSize: 0.0012, averagePrice: 50010.5, totalFees: 0.36, raw: "CANCELLED" },
+    "o-failed": { orderId: "o-failed", status: "FAILED", filledSize: 0, averagePrice: null, totalFees: 0, raw: "FAILED", message: "Insufficient balance" }
   };
 
   function pending(orderId: string): AssistedOrder {
     return order({ id: `id-${orderId}`, orderId, status: "submitted", provider: "coinbase", clientOrderId: `id-${orderId}` });
   }
 
-  it("maps FILLED, CANCELLED, OPEN and UNKNOWN exchange statuses", async () => {
+  it("maps FILLED, partial fills, CANCELLED, FAILED, OPEN and unknown exchange statuses", async () => {
     const { reconcileAssisted } = await load(true);
     m.listPendingAssistedOrders.mockResolvedValue(Object.keys(statuses).map(pending));
     const getOrder = vi.fn(async (orderId: string) => statuses[orderId]!);
@@ -454,7 +557,7 @@ describe("reconcileAssisted", () => {
 
     const result = await reconcileAssisted(USER);
 
-    expect(result).toEqual({ checked: 4, updated: 3 });
+    expect(result).toEqual({ checked: 6, updated: 4 });
     const patchFor = (id: string) => m.updateAssistedOrder.mock.calls.find((c) => c[0] === id)?.[1];
     expect(patchFor("id-o-filled")).toMatchObject({
       status: "filled",
@@ -462,18 +565,49 @@ describe("reconcileAssisted", () => {
       filledSize: 0.002,
       averagePrice: PRICE,
       totalFees: 0.6,
-      exchangeStatus: "FILLED"
+      exchangeStatus: "FILLED",
+      detail: "Filled 0.002 BTC at an average $50,000.00, fees $0.60."
     });
-    expect(patchFor("id-o-filled").detail).toContain("Filled 0.002 at average $50000");
-    expect(patchFor("id-o-cancelled")).toMatchObject({ status: "cancelled", reconcileState: "reconciled", exchangeStatus: "CANCELLED" });
+    // An IOC order Coinbase cancelled after a partial fill moved real money: it is a fill, not a zero.
+    expect(patchFor("id-o-partial")).toMatchObject({
+      status: "filled",
+      reconcileState: "reconciled",
+      filledSize: 0.0012,
+      averagePrice: 50010.5,
+      exchangeStatus: "CANCELLED",
+      detail: "Partially filled 0.0012 BTC at an average $50,010.50, fees $0.36; Coinbase reported CANCELLED for the rest."
+    });
+    expect(patchFor("id-o-cancelled")).toMatchObject({ status: "cancelled", reconcileState: "reconciled", exchangeStatus: "CANCELLED", detail: "Coinbase reported CANCELLED; nothing was filled." });
+    expect(patchFor("id-o-failed")).toMatchObject({ status: "failed", detail: "Coinbase reported FAILED; nothing was filled. Coinbase says: Insufficient balance." });
     expect(patchFor("id-o-open")).toEqual({ exchangeStatus: "OPEN" });
-    expect(patchFor("id-o-unknown")).toMatchObject({
-      reconcileState: "error",
-      exchangeStatus: "WEIRD",
-      detail: "Exchange returned an unknown status; check the order on Coinbase."
+    // An unrecognised status stays queued for the next pass instead of dropping out as an error.
+    expect(patchFor("id-o-unknown")).toEqual({ exchangeStatus: "WEIRD", detail: "Coinbase reported status WEIRD; reconcile again shortly." });
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "operations", "reconcile-assisted-orders", "Checked 6, updated 4.");
+  });
+
+  it("finds an unconfirmed order by client order id, and gives up after 10 minutes without a trace", async () => {
+    const { reconcileAssisted } = await load(true);
+    const recent = order({ id: "id-recent", orderId: null, status: "submitted", provider: "coinbase", clientOrderId: "id-recent" });
+    const stale = order({ id: "id-stale", orderId: null, status: "submitted", provider: "coinbase", clientOrderId: "id-stale", createdAt: new Date(Date.now() - 11 * 60_000).toISOString() });
+    const found = order({ id: "id-found", orderId: null, status: "submitted", provider: "coinbase", clientOrderId: "id-found" });
+    m.listPendingAssistedOrders.mockResolvedValue([recent, stale, found]);
+    const findOrderByClientId = vi.fn(async ({ clientOrderId }: { clientOrderId: string }): Promise<OrderStatus | null> =>
+      clientOrderId === "id-found" ? { orderId: "cb-found", status: "FILLED", filledSize: 0.002, averagePrice: PRICE, totalFees: 0.6, raw: "FILLED" } : null
+    );
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { findOrderByClientId }));
+    m.updateAssistedOrder.mockImplementation(async (id: string, patch: Partial<AssistedOrder>) => ({ ...order({ id }), ...patch }));
+
+    const result = await reconcileAssisted(USER);
+
+    expect(result).toEqual({ checked: 3, updated: 2 });
+    const patchFor = (id: string) => m.updateAssistedOrder.mock.calls.find((c) => c[0] === id)?.[1];
+    expect(patchFor("id-found")).toMatchObject({ orderId: "cb-found", status: "filled" });
+    expect(patchFor("id-stale")).toMatchObject({
+      status: "failed",
+      reconcileState: "reconciled",
+      detail: "Coinbase has no order with this client order id 10 minutes on, so it was never placed."
     });
-    expect(patchFor("id-o-unknown")).not.toHaveProperty("status");
-    expect(m.appendAudit).toHaveBeenCalledWith(USER, "operations", "reconcile-assisted-orders", "Checked 4, updated 3.");
+    expect(patchFor("id-recent")).toEqual({ detail: "Coinbase has no order with this client order id yet; reconcile again in a minute." });
   });
 
   it("keeps an order queued on a retriable error and marks it errored otherwise", async () => {

@@ -25,7 +25,7 @@ import { listAudit } from "@/lib/server/repos/audit";
 import { listExports } from "@/lib/server/repos/exports";
 import { saveLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
-import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
+import { previewAssisted, reconcileAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
 import { createExport } from "@/lib/server/services/exports";
 import { __setMarketFetchers } from "@/lib/server/services/market";
 import { placePaperOrder } from "@/lib/server/services/paper";
@@ -163,6 +163,15 @@ describe.skipIf(!enabled)("services", () => {
 
     const actions = (await listAudit(USER, { category: "assisted-order" })).map((e) => e.action).sort();
     expect(actions).toEqual(["previewed", "submitted"]);
+  });
+
+  it("settles a just-submitted order that already filled", async () => {
+    const { order } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
+    const settled = await settleAssisted(USER, await submitAssisted(USER, order.id));
+    expect(settled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.49701789 });
+    expect(settled.detail).toBe("Filled 0.49701789 BTC at an average $100.00, fees $0.30.");
+    expect(await getAssistedOrder(order.id, USER)).toEqual(settled);
+    expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
   });
 
   it("lets exactly one of two concurrent submits through", async () => {

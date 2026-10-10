@@ -99,6 +99,14 @@ describe("mock exchange", () => {
     expect(p.errors).toHaveLength(1);
   });
 
+  it("finds an order by its client order id", async () => {
+    const c = makeClient();
+    const r = await c.createOrder({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "50" }, clientOrderId: "c-find" });
+    const lookup = { productId: "BTC-USD", side: "BUY" as const, createdAfter: "2026-01-01T00:00:00Z", createdBefore: "2099-01-01T00:00:00Z" };
+    expect(await c.findOrderByClientId({ ...lookup, clientOrderId: "c-find" })).toMatchObject({ orderId: r.orderId, status: "FILLED" });
+    expect(await c.findOrderByClientId({ ...lookup, clientOrderId: "c-missing" })).toBeNull();
+  });
+
   it("returns UNKNOWN for unissued ids", async () => {
     const s = await makeClient().getOrder("never-issued");
     expect(s).toMatchObject({ orderId: "never-issued", status: "UNKNOWN", filledSize: null });

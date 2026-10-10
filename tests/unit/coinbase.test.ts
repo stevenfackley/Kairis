@@ -288,16 +288,58 @@ describe("authed mappers", () => {
     for (const s of ["FILLED", "CANCELLED", "EXPIRED", "FAILED", "OPEN"]) {
       expect(row(s).status).toBe(s);
     }
-    for (const s of ["PENDING", "QUEUED", "CANCEL_QUEUED"]) {
+    // Every documented in-flight status, EDIT_QUEUED included.
+    for (const s of ["PENDING", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"]) {
       expect(row(s).status).toBe("PENDING");
     }
+    expect(row("UNKNOWN_ORDER_STATUS")).toMatchObject({ status: "UNKNOWN", raw: "UNKNOWN_ORDER_STATUS" });
     expect(row("WEIRD")).toMatchObject({ status: "UNKNOWN", raw: "WEIRD" });
     expect(
       mapOrderStatus({
         order: { order_id: "o", status: "FILLED", filled_size: "0.5", average_filled_price: "200", total_fees: "0.6" }
       })
-    ).toEqual({ orderId: "o", status: "FILLED", filledSize: 0.5, averagePrice: 200, totalFees: 0.6, raw: "FILLED" });
+    ).toEqual({ orderId: "o", status: "FILLED", filledSize: 0.5, averagePrice: 200, totalFees: 0.6, raw: "FILLED", message: null });
     expect(() => mapOrderStatus({})).toThrow();
+  });
+
+  it("mapOrderStatus reads a recorded IOC order, a partial fill and a rejection", () => {
+    // Recorded GET orders/historical entry (ccxt coinbase adapter), quote-sized market buy.
+    const recorded = {
+      order: {
+        order_id: "813a53c5-3e39-47bb-863d-2faf685d22d8",
+        product_id: "BTC-USDT",
+        order_configuration: { market_market_ioc: { quote_size: "6.36" } },
+        side: "BUY",
+        client_order_id: "18eb9947-db49-4874-8e7b-39b8fe5f4317",
+        status: "FILLED",
+        time_in_force: "IMMEDIATE_OR_CANCEL",
+        completion_percentage: "100",
+        filled_size: "0.000297920684505",
+        average_filled_price: "21220.6399999973697697",
+        number_of_fills: "2",
+        filled_value: "6.3220675944333996",
+        size_in_quote: true,
+        total_fees: "0.0379324055666004",
+        size_inclusive_of_fees: true,
+        total_value_after_fees: "6.36",
+        reject_message: "",
+        cancel_message: "Internal error"
+      }
+    };
+    expect(mapOrderStatus(recorded)).toEqual({
+      orderId: "813a53c5-3e39-47bb-863d-2faf685d22d8",
+      status: "FILLED",
+      filledSize: 0.000297920684505,
+      averagePrice: 21220.6399999973697697,
+      totalFees: 0.0379324055666004,
+      raw: "FILLED",
+      message: null
+    });
+    const partial = { order: { ...recorded.order, status: "CANCELLED", completion_percentage: "40", filled_size: "0.0001", cancel_message: "IOC remainder cancelled" } };
+    expect(mapOrderStatus(partial)).toMatchObject({ status: "CANCELLED", filledSize: 0.0001, message: "IOC remainder cancelled" });
+    const unfilled = { order: { ...recorded.order, status: "FAILED", filled_size: "0", average_filled_price: "0", total_fees: "0", reject_message: "Insufficient balance", cancel_message: "" } };
+    // "0" is Coinbase's placeholder for no average price, not a price of zero.
+    expect(mapOrderStatus(unfilled)).toMatchObject({ status: "FAILED", filledSize: 0, averagePrice: null, message: "Insufficient balance" });
   });
 });
 
@@ -405,6 +447,39 @@ describe("createCoinbaseClient", () => {
       createCoinbaseClient(creds, f).createOrder({ productId: "BTC-USD", side: "SELL", size: { kind: "quote", quoteSize: "100" }, clientOrderId: "c1" })
     ).rejects.toThrow("A market SELL must be sized in base currency (base_size).");
     expect(f).not.toHaveBeenCalled();
+  });
+
+  it("findOrderByClientId lists a narrow window and matches client_order_id", async () => {
+    const page = {
+      orders: [
+        { order_id: "other", client_order_id: "someone-else", status: "FILLED" },
+        { order_id: "cb-7", client_order_id: "11111111-1111-4111-8111-111111111111", status: "FILLED", filled_size: "0.002", average_filled_price: "50000", total_fees: "0.6" }
+      ],
+      has_next: false,
+      cursor: ""
+    };
+    const f = stub(200, page);
+    const found = await createCoinbaseClient(creds, f).findOrderByClientId({
+      clientOrderId: "11111111-1111-4111-8111-111111111111",
+      productId: "BTC-USD",
+      side: "BUY",
+      createdAfter: "2026-10-10T12:00:00.000Z",
+      createdBefore: "2026-10-10T12:15:00.000Z"
+    });
+    expect(found).toMatchObject({ orderId: "cb-7", status: "FILLED", filledSize: 0.002 });
+    expect(call(f).url).toBe(
+      "https://api.coinbase.com/api/v3/brokerage/orders/historical/batch?product_ids=BTC-USD&order_side=BUY&start_date=2026-10-10T12%3A00%3A00.000Z&end_date=2026-10-10T12%3A15%3A00.000Z&limit=100"
+    );
+    expect(generateJwt).toHaveBeenLastCalledWith(expect.objectContaining({ requestPath: "/api/v3/brokerage/orders/historical/batch" }));
+
+    const none = await createCoinbaseClient(creds, stub(200, { orders: [], has_next: false })).findOrderByClientId({
+      clientOrderId: "x",
+      productId: "BTC-USD",
+      side: "BUY",
+      createdAfter: "2026-10-10T12:00:00.000Z",
+      createdBefore: "2026-10-10T12:15:00.000Z"
+    });
+    expect(none).toBeNull();
   });
 
   it("getOrder GETs historical", async () => {

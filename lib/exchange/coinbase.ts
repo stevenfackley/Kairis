@@ -9,6 +9,7 @@ import type {
   FetchLike,
   KeyPermissions,
   OrderInput,
+  OrderLookup,
   OrderPreview,
   OrderStatus,
   OrderSubmitResult
@@ -145,6 +146,7 @@ function mapStatus(raw: string): ExchangeOrderStatus {
     case "PENDING":
     case "QUEUED":
     case "CANCEL_QUEUED":
+    case "EDIT_QUEUED":
       return "PENDING";
     default:
       return "UNKNOWN";
@@ -161,13 +163,18 @@ export function mapOrderStatus(json: unknown): OrderStatus {
     throw new Error("Malformed Coinbase order response.");
   }
   const raw = typeof order.status === "string" ? order.status : "";
+  const status = mapStatus(raw);
+  const average = optNum(order.average_filled_price);
   return {
     orderId,
-    status: mapStatus(raw),
+    status,
     filledSize: optNum(order.filled_size),
-    averagePrice: optNum(order.average_filled_price),
+    // average_filled_price is a required string: "0" stands for "no fills yet", not a price.
+    averagePrice: average === 0 ? null : average,
     totalFees: optNum(order.total_fees),
-    raw
+    raw,
+    // A FILLED order can still carry a stray cancel_message (seen in recorded responses); only explain non-fills.
+    message: status === "FILLED" ? null : (optStr(order.reject_message) ?? optStr(order.cancel_message))
   };
 }
 
@@ -267,6 +274,32 @@ export function createCoinbaseClient(
         order_configuration: marketOrder(input)
       });
       return mapSubmit(json, input.clientOrderId);
+    },
+    // GET orders/historical/batch has no client_order_id filter, so list the product, side and time
+    // window the order could have been created in and match client_order_id here.
+    async findOrderByClientId(lookup: OrderLookup) {
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page += 1) {
+        const params = new URLSearchParams({
+          product_ids: lookup.productId,
+          order_side: lookup.side,
+          start_date: lookup.createdAfter,
+          end_date: lookup.createdBefore,
+          limit: "100"
+        });
+        if (cursor) params.set("cursor", cursor);
+        const json = await request<unknown>("GET", `${basePath}/orders/historical/batch?${params.toString()}`);
+        if (!isRecord(json) || !Array.isArray(json.orders)) {
+          throw new Error("Malformed Coinbase orders response.");
+        }
+        const hit = (json.orders as unknown[]).find((o) => isRecord(o) && o.client_order_id === lookup.clientOrderId);
+        if (hit) {
+          return mapOrderStatus({ order: hit });
+        }
+        cursor = json.has_next === true ? optStr(json.cursor) : null;
+        if (!cursor) break;
+      }
+      return null;
     },
     async getOrder(orderId) {
       const json = await request<unknown>(

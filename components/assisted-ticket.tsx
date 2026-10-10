@@ -66,11 +66,14 @@ function useSecondsLeft(previewKey: string | null): number {
 
 function resultCopy(order: AssistedOrder): string {
   if (order.status === "submitted") {
+    if (!order.orderId) {
+      return `${order.detail} Press Reconcile now below to check.`;
+    }
     return order.provider === "coinbase"
-      ? "Submitted. Reconcile to pull the fill from Coinbase."
-      : "Submitted to the mock provider. Reconcile to pull the simulated fill.";
+      ? "Coinbase accepted the order but has not reported the fill yet. Press Reconcile now below to pull it."
+      : "Submitted to the mock provider. Press Reconcile now below to pull the simulated fill.";
   }
-  if (order.status === "blocked" || order.status === "failed") {
+  if (order.status === "blocked" || order.status === "failed" || order.status === "filled") {
     return order.detail;
   }
   return `Status: ${order.status}. ${order.detail}`;
