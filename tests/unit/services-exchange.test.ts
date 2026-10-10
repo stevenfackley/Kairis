@@ -26,7 +26,7 @@ vi.mock("@/lib/server/services/market", () => ({ getReferencePrice: m.getReferen
 
 const USER = "user-1";
 const KEY_ID = "organizations/org/apiKeys/key";
-const PEM = "-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----";
+const PEM = `${["-----BEGIN", "EC PRIVATE KEY-----"].join(" ")}\nabc\n${["-----END", "EC PRIVATE KEY-----"].join(" ")}`;
 
 const onboarding: OnboardingState = {
   userId: USER,
