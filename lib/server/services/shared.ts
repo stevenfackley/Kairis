@@ -1,6 +1,8 @@
+import { usdPrice } from "@/lib/domain/money";
 import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
 import type { ProductRules } from "@/lib/exchange/sizing";
+import { num } from "@/lib/format";
 import type { RiskDecision } from "@/lib/types";
 
 // numeric(12,2) money columns: an absurd or non-finite size still has to persist on a blocked row.
@@ -18,9 +20,6 @@ export function storablePrice(n: number): number {
   return Number.isFinite(n) && n >= 0 && n <= MAX_NUMERIC_18_8 ? n : 0;
 }
 
-function plain(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
 
 /**
  * Why a computed fill cannot be stored as is, in plain language, or null when every value fits its
@@ -36,10 +35,10 @@ export function unstorableFillReason(
     return `There is no usable market price for ${productId} right now, so nothing was filled.`;
   }
   if (!Number.isFinite(fill.baseSize) || fill.baseSize > MAX_NUMERIC_18_8) {
-    return `This order is too large to record: ${plain(Math.round(fill.baseSize))} ${base} is more than Kairis can store. Use a smaller order.`;
+    return `This order is too large to record: ${num(Math.round(fill.baseSize), 8)} ${base} is more than Kairis can store. Use a smaller order.`;
   }
   if (fill.baseSize < MIN_NUMERIC_18_8) {
-    return `This order is too small to fill: at $${plain(fill.price)} it comes to less than 0.00000001 ${base}.`;
+    return `This order is too small to fill: at ${usdPrice(fill.price)} it comes to less than 0.00000001 ${base}.`;
   }
   const money = [fill.feeUsd, fill.realizedPnlUsd];
   if (money.some((n) => !Number.isFinite(n) || Math.abs(n) > MAX_STORABLE_USD)) {

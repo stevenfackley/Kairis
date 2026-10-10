@@ -1,3 +1,4 @@
+import { usdPrice } from "@/lib/domain/money";
 import { env } from "@/lib/env";
 import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
@@ -45,7 +46,7 @@ export function __setSettleDelayMs(ms: number): void {
 }
 
 const coins = (n: number) => num(n, 8);
-const price = (n: number) => (n >= 1 ? usd(n) : `$${num(n, 8)}`);
+
 const baseOf = (productId: string) => productId.split("-")[0] ?? productId;
 
 const label = (o: Pick<AssistedOrder, "side" | "productId" | "quoteUsd">) => `${o.side} ${o.productId} ${usd(o.quoteUsd)}`;
@@ -414,7 +415,7 @@ const TERMINAL: Partial<Record<OrderStatus["status"], "cancelled" | "expired" | 
 
 function fillText(order: Pick<AssistedOrder, "productId">, status: OrderStatus): string {
   const size = status.filledSize === null ? "an unreported size" : `${coins(status.filledSize)} ${baseOf(order.productId)}`;
-  const avg = status.averagePrice === null ? "an unreported price" : `an average ${price(status.averagePrice)}`;
+  const avg = status.averagePrice === null ? "an unreported price" : `an average ${usdPrice(status.averagePrice)}`;
   return `${size} at ${avg}, fees ${usd(status.totalFees ?? 0)}`;
 }
 

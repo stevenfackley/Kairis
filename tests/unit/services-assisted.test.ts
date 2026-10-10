@@ -634,6 +634,23 @@ describe("reconcileAssisted", () => {
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "operations", "reconcile-assisted-orders", "Checked 6, updated 4.");
   });
 
+  it("writes fill sizes and sub-dollar prices through the shared formatters", async () => {
+    const { reconcileAssisted } = await load(true);
+    const fills: Record<string, OrderStatus> = {
+      "o-shib": { orderId: "o-shib", status: "FILLED", filledSize: 18205783.61333829, averagePrice: 0.00000546, totalFees: 0.59642147, raw: "FILLED" },
+      "o-half": { orderId: "o-half", status: "FILLED", filledSize: 10, averagePrice: 0.5, totalFees: 0.03, raw: "FILLED" }
+    };
+    m.listPendingAssistedOrders.mockResolvedValue(Object.keys(fills).map((id) => ({ ...pending(id), productId: id === "o-shib" ? "SHIB-USD" : "DOGE-USD" })));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { getOrder: vi.fn(async (orderId: string) => fills[orderId]!) }));
+    m.updateAssistedOrder.mockImplementation(async (id: string, patch: Partial<AssistedOrder>) => ({ ...order({ id }), ...patch }));
+
+    await reconcileAssisted(USER);
+
+    const detailFor = (id: string) => (m.updateAssistedOrder.mock.calls.find((c) => c[0] === id)?.[1] as Partial<AssistedOrder>).detail;
+    expect(detailFor("id-o-shib")).toBe("Filled 18,205,783.61333829 SHIB at an average $0.00000546, fees $0.60.");
+    expect(detailFor("id-o-half")).toBe("Filled 10 DOGE at an average $0.50, fees $0.03.");
+  });
+
   it("expires previews abandoned for more than 2 minutes on every reconcile and preview", async () => {
     const { reconcileAssisted, previewAssisted } = await load(true);
     m.listPendingAssistedOrders.mockResolvedValue([]);

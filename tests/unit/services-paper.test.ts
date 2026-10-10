@@ -27,7 +27,7 @@ vi.mock("@/lib/server/services/market", () => ({
 }));
 
 import { placePaperOrder } from "@/lib/server/services/paper";
-import { UnknownProductError } from "@/lib/server/services/shared";
+import { UnknownProductError, unstorableFillReason } from "@/lib/server/services/shared";
 
 const USER = "user-1";
 const PRICE = 50000;
@@ -171,6 +171,17 @@ describe("placePaperOrder", () => {
     );
     expect(m.insertPaperTrade).not.toHaveBeenCalled();
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "paper-trade", "rejected", expect.stringContaining("too large to record"));
+  });
+
+  it("rejects a fill too small for the size column, with the price written as money", async () => {
+    priceAt({ "BTC-USD": 1_000_000_000 });
+    await expect(placePaperOrder(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 1 })).rejects.toThrow(
+      "This order is too small to fill: at $1,000,000,000.00 it comes to less than 0.00000001 BTC."
+    );
+    expect(m.insertPaperTrade).not.toHaveBeenCalled();
+    expect(unstorableFillReason("SHIB-USD", { baseSize: 0, price: 0.5, feeUsd: 0, realizedPnlUsd: 0 })).toBe(
+      "This order is too small to fill: at $0.50 it comes to less than 0.00000001 SHIB."
+    );
   });
 
   it("sells the entire held position exactly, sized at the current price, leaving no dust", async () => {
