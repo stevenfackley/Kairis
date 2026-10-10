@@ -60,22 +60,21 @@ Key strategic choices:
 
 ## Infrastructure Strategy
 
-Kairis should use existing managed infrastructure where it reduces operational burden.
+Kairis uses shared Qavren platform services where that reduces operational burden.
 
-Initial infrastructure assumptions:
+Infrastructure:
 
-- `Supabase Postgres` is the default backend platform for relational data and core managed application state
-- `Cloudflare R2` is the preferred object storage layer for exports, artifacts, and other file-oriented outputs
-- local `Proxmox` is the intended platform for test environments
-- only `AWS EC2` is assumed to be available from AWS, and it is the intended production hosting target
-- `GitHub Actions` is the default CI/CD layer for validation and deployment workflows
-- the application runtime should stay light enough for local Proxmox-based test deployments
+- data lives in a dedicated schema on qavren-db, the shared Supabase Pro Postgres project
+- identity is a Keycloak realm on qavren-auth
+- the app runs on the shared Qavren hub behind a Cloudflare tunnel, so Kairis adds no server of its own
+- `Cloudflare R2` is the object storage layer for exports and other file-oriented outputs
+- `GitHub Actions` is the CI/CD layer for validation and deployment workflows
 
 Business implication:
 
 - reduce time spent on infrastructure before product fit is proven
 - favor lower-ops managed services over premature platform complexity
-- keep architecture portable enough to support local Proxmox test environments and EC2-based production hosting without assuming broader AWS services
+- share databases, identity and hosting across products instead of paying for a server and database per product
 - keep delivery workflows simple and repo-native through GitHub Actions
 
 ## Revenue Model

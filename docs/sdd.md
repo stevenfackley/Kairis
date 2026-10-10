@@ -18,20 +18,22 @@ Primary subsystems:
 
 ## Deployment Assumptions
 
-The initial system design should reflect available infrastructure:
+The system runs on shared Qavren platform services rather than per-app infrastructure:
 
-- `Supabase Postgres` is the default managed backend for relational data and operational records
-- `Cloudflare R2` is the default object storage layer for exports, generated reports, and file-like artifacts
-- local `Proxmox` is the intended host for test environments
-- only `AWS EC2` is assumed to be available from AWS, and it is the intended production deployment target
-- `GitHub Actions` is the default CI/CD mechanism for validation, packaging, and deployment
-- the application runtime should be lightweight enough to run in local Proxmox-based test environments
+- data lives in the `kairis` schema on qavren-db, a shared Supabase Pro Postgres project with one schema and login role per app; Postgres is required and there is no local-file fallback
+- identity is a Keycloak realm per app on qavren-auth (`kairis` in production, `kairis-dev` for localhost), consumed through `@qavren/auth-next`
+- the application runs as one container on the shared Qavren hub (`Qavren-Web-Server`), published through a Cloudflare tunnel at `kairis.qavrensolutions.com`; the image is stored in ECR and deployed over SSM
+- `Cloudflare R2` is the object storage layer for exports and generated reports; without R2 credentials exports go to local disk
+- `GitHub Actions` is the CI/CD mechanism for validation, packaging, and deployment; AWS access is OIDC only
+- there is no test environment; CI and a local Postgres compose stack cover pre-production
 
 Design consequence:
 
-- prefer managed components for stateful infrastructure
-- keep stateless application services portable
-- avoid architecture that depends on heavy always-on self-managed infrastructure in the first release
+- keep the application stateless apart from Postgres and R2
+- do not depend on database session state, because production traffic goes through a transaction pooler
+- do not add per-app servers; new hosting goes on the shared hub
+
+See [deployment](deployment.md), [database](database.md) and [identity](identity.md).
 
 ## Boundary Rules
 
@@ -67,7 +69,7 @@ Critical rule:
 
 Implementation assumption:
 
-- user identity, entitlements, and account metadata should live in managed Postgres-backed data stores unless later requirements force separation
+- credentials and sign-in are handled by qavren-auth; Kairis keys its records by the Keycloak subject and keeps entitlements and account metadata in its own Postgres schema
 
 ### Exchange Integration Layer
 
@@ -114,7 +116,7 @@ Responsibilities:
 
 Implementation assumption:
 
-- structured operational records should live in managed Postgres
+- structured operational records live in the `kairis` Postgres schema on qavren-db
 - file-based exports and generated artifacts should be stored in Cloudflare R2
 
 ## Execution Flow By Mode
@@ -161,7 +163,7 @@ Infrastructure-specific considerations:
 - avoid storing secrets in client-visible contexts
 - keep exchange credentials outside of object storage paths
 - treat R2 as artifact storage, not secret storage
-- use managed platform controls where possible before introducing custom ops overhead
+- use the shared platform services (qavren-db, qavren-auth, the hub) before introducing custom ops overhead
 - use `r2.dev` public URLs only for test or development environments; production artifact delivery should move to a custom domain under the Kairis-controlled DNS surface
 
 ## Non-Functional Requirements
@@ -170,5 +172,5 @@ Infrastructure-specific considerations:
 - deterministic control evaluation
 - resilient exchange sync
 - safe failure defaults
-- portability between local Proxmox test environments and AWS EC2 production hosting
+- a container image that runs the same locally (against the dev compose Postgres) and on the hub
 - CI/CD workflows that are compatible with GitHub Actions as the system of record
