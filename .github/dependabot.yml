@@ -7,6 +7,8 @@ updates:
     groups:
       next-react:
         patterns: ["next", "react*", "eslint-config-next"]
+      tooling:
+        patterns: ["eslint*", "vitest"]
       testing:
         patterns: ["vitest*", "@testing-library/*", "@playwright/*", "jsdom"]
     ignore:

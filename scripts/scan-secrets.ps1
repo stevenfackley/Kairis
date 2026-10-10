@@ -1,7 +1,7 @@
 #requires -Version 7
 [CmdletBinding()]
 param(
-    [string[]]$Paths = @('src', 'tests'),
+    [string[]]$Paths = @('app','lib','components','scripts','infra','tests','docs'),
     [string]$BannedPackages = 'ApplicationInsights|Sentry|Segment|Mixpanel|Datadog|NewRelic|Raygun|Rollbar|Bugsnag|HockeyApp|AppCenter|GoogleAnalytics'
 )
 $ErrorActionPreference = 'Stop'

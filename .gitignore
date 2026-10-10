@@ -5,9 +5,6 @@ dist/
 .npm-cache/
 *.tsbuildinfo
 .local-data/
-proxmox-data/
-supabase/.temp/
-.env.proxmox-test
 
 .env
 .env.local
@@ -22,3 +19,8 @@ pnpm-debug.log*
 
 .DS_Store
 Thumbs.db
+
+infra/.terraform/
+infra/*.tfstate*
+infra/*.tfplan
+infra/terraform.tfvars
