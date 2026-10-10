@@ -14,35 +14,36 @@ const FIELDS: Array<{ name: NumberField; label: string; help: string; step: stri
   {
     name: "maxPositionUsd",
     label: "Max position (USD)",
-    help: "The most one product can hold once an order fills, counting what you already hold.",
+    help: "The most one product can hold once an order fills, counting what you already hold at the current market price.",
     step: "0.01",
     min: "0.01"
   },
   {
     name: "dailyLossCapUsd",
     label: "Daily loss cap (USD)",
-    help: "When today's realized losses reach this amount, new orders wait until the next UTC day.",
+    help:
+      "Counts realized P&L only: closed trades (sells), net of fees. Losses on positions you still hold do not count. When realized losses today (UTC) reach this amount, new orders wait until 00:00 UTC.",
     step: "0.01",
     min: "0.01"
   },
   {
     name: "maxTradesPerDay",
     label: "Max trades per day",
-    help: "Orders allowed per UTC day, counted separately for paper and live.",
+    help: "Filled orders allowed per UTC day, counted separately for paper and live. Blocked attempts do not count.",
     step: "1",
     min: "1"
   },
   {
     name: "cooldownMinutes",
     label: "Cooldown minutes after a loss streak",
-    help: "How long new orders wait after the last loss in a streak.",
+    help: "How long new orders wait after the last loss in a streak, counted from that loss.",
     step: "1",
     min: "1"
   },
   {
     name: "lossStreakTrigger",
     label: "Loss streak trigger",
-    help: "Losing sells in a row that start the cooldown.",
+    help: "Losing sells in a row within the same UTC day (fees included) that start the cooldown. A buy is never a loss.",
     step: "1",
     min: "1"
   }
@@ -152,10 +153,13 @@ export function LimitsForm({ limits }: { limits: TradingLimits }) {
         ))}
       </fieldset>
 
+      {/* What the box showed when the form loaded: saving only changes the pause if you toggled the box. */}
+      <input type="hidden" name="pausedWas" value={limits.tradingPaused ? "true" : "false"} />
       <label className="check">
         <input type="checkbox" name="tradingPaused" checked={paused} onChange={(event) => setPaused(event.target.checked)} />
         <span>
-          <strong>Pause all trading (kill switch)</strong>. While paused, no new paper or live order can be placed.
+          <strong>Pause all trading (kill switch)</strong>. While paused, no new paper or live order can be placed. Saving
+          your limits leaves the pause as it is unless you change this box.
         </span>
       </label>
 

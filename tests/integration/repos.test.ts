@@ -143,6 +143,15 @@ describe.skipIf(!enabled)("repos", () => {
     expect(fresh).toMatchObject({ userId: "user-2", ...DEFAULT_LIMITS, perSymbolMaxUsd: {}, tradingPaused: true });
   });
 
+  it("saveLimits without a pause value keeps the stored pause, and a new row starts unpaused", async () => {
+    const limits = { maxPositionUsd: 900, dailyLossCapUsd: 100, maxTradesPerDay: 3, cooldownMinutes: 15, lossStreakTrigger: 2, perSymbolMaxUsd: {} };
+    await setTradingPaused(USER, true);
+    const kept = await saveLimits({ userId: USER, ...limits });
+    expect(kept).toMatchObject({ maxPositionUsd: 900, tradingPaused: true });
+    expect((await saveLimits({ userId: USER, ...limits, tradingPaused: false })).tradingPaused).toBe(false);
+    expect((await saveLimits({ userId: "user-3", ...limits })).tradingPaused).toBe(false);
+  });
+
   it("latestSignals returns the newest signal per product, ordered by product", async () => {
     await insertSignal(signal("ETH-USD", "2026-10-09T09:00:00.000Z", "old-eth"));
     const newestEth = await insertSignal(signal("ETH-USD", "2026-10-09T10:00:00.000Z", "new-eth"));
