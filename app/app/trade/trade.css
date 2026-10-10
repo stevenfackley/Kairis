@@ -1,0 +1,76 @@
+/* Assisted trade page: ticket layout and step indicator. Page-scoped by class name. */
+
+.ticket,
+.ticket-form,
+.ticket-result {
+  display: grid;
+  gap: 18px;
+}
+
+.ticket-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-family: var(--ui-font);
+  font-size: 0.9rem;
+}
+
+.ticket-steps li[aria-current="step"] {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.ticket-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.ticket-steps li[aria-current="step"] .ticket-step-number {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+.ticket-summary {
+  margin: 0;
+  font-family: var(--ui-font);
+  font-size: 1.05rem;
+}
+
+.ticket-preview h3 {
+  margin: 0;
+}
+
+.ticket-warnings-label {
+  margin-top: 16px;
+}
+
+.trade-notice {
+  border: 1px solid rgba(242, 166, 161, 0.45);
+  border-radius: 18px;
+}
+
+.trade-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 12px;
+}
+
+.trade-mode .field-help {
+  max-width: 48rem;
+}
+
+.trade-split {
+  margin-bottom: 0;
+}

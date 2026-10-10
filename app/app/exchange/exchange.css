@@ -1,0 +1,17 @@
+/* Exchange page. Page-scoped by class name. */
+
+.exchange-form,
+.exchange-disconnect {
+  display: grid;
+  gap: 18px;
+}
+
+.panel .status-stack + .exchange-disconnect,
+.panel .status-stack + .panel-copy {
+  margin-top: 18px;
+}
+
+.exchange-notice {
+  border: 1px solid rgba(242, 166, 161, 0.45);
+  border-radius: 18px;
+}
