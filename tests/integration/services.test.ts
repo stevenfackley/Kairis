@@ -17,13 +17,15 @@ const { scratchDir } = vi.hoisted(() => {
   return { scratchDir: dir };
 });
 
+import { __setProductLoader } from "@/lib/exchange/coinbase-public";
+import type { ProductRules } from "@/lib/exchange/types";
 import { closePool, query } from "@/lib/server/db";
 import { getAssistedOrder } from "@/lib/server/repos/assisted";
 import { listAudit } from "@/lib/server/repos/audit";
 import { listExports } from "@/lib/server/repos/exports";
 import { saveLimits } from "@/lib/server/repos/limits";
 import { listPaperTrades } from "@/lib/server/repos/paper";
-import { previewAssisted, reconcileAssisted, submitAssisted } from "@/lib/server/services/assisted";
+import { previewAssisted, reconcileAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
 import { createExport, openExportDownload } from "@/lib/server/services/exports";
 import { __setMarketFetchers } from "@/lib/server/services/market";
 import { placePaperOrder } from "@/lib/server/services/paper";
@@ -60,10 +62,32 @@ function ticker(productId: string): Ticker {
   return { productId, price: PRICE, bestBid: PRICE - 0.01, bestAsk: PRICE + 0.01, tradeTime: Date.now() };
 }
 
+// Coinbase's BTC-USD rules (captured 2026-10-10), applied to every product the suite trades.
+function rules(productId: string): ProductRules {
+  return {
+    productId,
+    baseCurrency: productId.split("-")[0]!,
+    status: "online",
+    baseIncrement: "0.00000001",
+    quoteIncrement: "0.01",
+    baseMinSize: "0.00000001",
+    baseMaxSize: "3400",
+    quoteMinSize: "1",
+    quoteMaxSize: "150000000",
+    isDisabled: false,
+    tradingDisabled: false,
+    cancelOnly: false,
+    limitOnly: false,
+    postOnly: false,
+    viewOnly: false
+  };
+}
+
 describe.skipIf(!enabled)("services", () => {
   beforeAll(async () => {
     execFileSync("node", ["scripts/db-migrate.mjs"], { cwd: repoRoot, env: process.env, stdio: "pipe" });
     __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
+    __setProductLoader(async (productId) => rules(productId));
   });
 
   beforeEach(async () => {
@@ -74,6 +98,7 @@ describe.skipIf(!enabled)("services", () => {
 
   afterAll(async () => {
     __setMarketFetchers(null);
+    __setProductLoader(null);
     await rm(path.resolve(repoRoot, scratchDir), { recursive: true, force: true });
     await closePool();
   });
@@ -145,12 +170,23 @@ describe.skipIf(!enabled)("services", () => {
 
     expect(await reconcileAssisted(USER)).toEqual({ checked: 1, updated: 1 });
     const filled = await getAssistedOrder(order.id, USER);
-    expect(filled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.5, averagePrice: PRICE, totalFees: 0.3 });
+    // $50 spent including the fee, as on Coinbase: 49.70178926 bought coins and 0.29821074 was the fee.
+    expect(filled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.49701789, averagePrice: PRICE, totalFees: 0.29821074 });
+    expect(filled?.orderSize).toEqual({ kind: "quote", quoteSize: "50" });
     expect(filled?.reconciledAt).not.toBeNull();
     expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
 
     const actions = (await listAudit(USER, { category: "assisted-order" })).map((e) => e.action).sort();
     expect(actions).toEqual(["previewed", "submitted"]);
+  });
+
+  it("settles a just-submitted order that already filled", async () => {
+    const { order } = await previewAssisted(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 50 });
+    const settled = await settleAssisted(USER, await submitAssisted(USER, order.id));
+    expect(settled).toMatchObject({ status: "filled", reconcileState: "reconciled", exchangeStatus: "FILLED", filledSize: 0.49701789 });
+    expect(settled.detail).toBe("Filled 0.49701789 BTC at an average $100.00, fees $0.30.");
+    expect(await getAssistedOrder(order.id, USER)).toEqual(settled);
+    expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
   });
 
   it("lets exactly one of two concurrent submits through", async () => {

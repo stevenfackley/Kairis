@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, query } from "@/lib/server/db";
-import { getAssistedOrder, insertAssistedOrder, listAssistedOrders, listPendingAssistedOrders, updateAssistedOrder } from "@/lib/server/repos/assisted";
+import {
+  claimPreviewedOrder,
+  expireStalePreviews,
+  getAssistedOrder,
+  insertAssistedOrder,
+  listAssistedOrders,
+  listPendingAssistedOrders,
+  updateAssistedOrder
+} from "@/lib/server/repos/assisted";
 import { appendAudit, listAudit } from "@/lib/server/repos/audit";
 import { deleteConnection, getConnection, saveConnection } from "@/lib/server/repos/exchange";
 import { insertExport, listExports } from "@/lib/server/repos/exports";
@@ -245,6 +253,23 @@ describe.skipIf(!enabled)("repos", () => {
     await expect(insertAssistedOrder(assisted({}))).rejects.toThrow();
   });
 
+  it("expireStalePreviews closes only old, unclaimed previews of that user", async () => {
+    const old = "2026-10-10T10:00:00.000Z";
+    const stale = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+    const claimed = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+    await claimPreviewedOrder(claimed.id, USER);
+    const fresh = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null }));
+    const other = await insertAssistedOrder(assisted({ userId: "user-2", status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
+
+    expect(await expireStalePreviews(USER, "2026-10-10T11:00:00.000Z", "Preview expired.")).toBe(1);
+
+    expect(await getAssistedOrder(stale.id, USER)).toMatchObject({ status: "expired", reconcileState: "reconciled", detail: "Preview expired." });
+    expect((await getAssistedOrder(stale.id, USER))?.reconciledAt).not.toBeNull();
+    expect((await getAssistedOrder(claimed.id, USER))?.status).toBe("previewed");
+    expect((await getAssistedOrder(fresh.id, USER))?.status).toBe("previewed");
+    expect((await getAssistedOrder(other.id, "user-2"))?.status).toBe("previewed");
+  });
+
   it("saveConnection/getConnection round-trip the sealed secret; deleteConnection removes it", async () => {
     const sealed = { ciphertext: "c1", iv: "iv1", tag: "t1" };
     const saved = await saveConnection({
@@ -255,12 +280,13 @@ describe.skipIf(!enabled)("repos", () => {
       canTrade: true,
       canTransfer: false,
       portfolioUuid: null,
+      portfolioType: "CONSUMER",
       validatedAt: "2026-10-09T10:00:00.000Z",
       createdAt: "",
       sealed
     });
     expect(saved).not.toHaveProperty("sealed");
-    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, validatedAt: "2026-10-09T10:00:00.000Z" });
+    expect(saved).toMatchObject({ keyId: "organizations/x/apiKeys/y", canTrade: true, canTransfer: false, portfolioType: "CONSUMER", validatedAt: "2026-10-09T10:00:00.000Z" });
 
     const stored = await getConnection(USER);
     expect(stored).toEqual({ ...saved, sealed });
