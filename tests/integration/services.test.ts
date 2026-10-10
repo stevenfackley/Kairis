@@ -4,23 +4,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Runs before the imports below evaluate lib/env.ts. The suite gets its own Postgres schema (via the
-// connection's search_path) because vitest runs test files in parallel and repos.test.ts truncates the
-// same tables. Exports go to a scratch folder, never to R2, and live assisted trading stays off: the
-// mock provider is what this suite drives.
-const { schema, scratchDir } = vi.hoisted(() => {
-  const isolated = { schema: "kairis_services_test", scratchDir: ".local-data/test-services" };
-  const url = process.env.DATABASE_URL ?? "";
-  if (url) {
-    const options = encodeURIComponent(`-c search_path=${isolated.schema}`);
-    process.env.DATABASE_URL = `${url}${url.includes("?") ? "&" : "?"}options=${options}`;
-  }
-  process.env.LOCAL_DATA_DIR = isolated.scratchDir;
+// Runs before the imports below evaluate lib/env.ts. Exports go to a scratch folder, never to R2, and
+// live assisted trading stays off: the mock provider is what this suite drives. Files run serially
+// (vitest.config.ts), so this suite shares the database and truncation pattern with repos.test.ts.
+const { scratchDir } = vi.hoisted(() => {
+  const dir = ".local-data/test-services";
+  process.env.LOCAL_DATA_DIR = dir;
   process.env.ENABLE_LIVE_ASSISTED_TRADING = "false";
   for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) {
     delete process.env[key];
   }
-  return isolated;
+  return { scratchDir: dir };
 });
 
 import { closePool, query } from "@/lib/server/db";
@@ -68,7 +62,6 @@ function ticker(productId: string): Ticker {
 
 describe.skipIf(!enabled)("services", () => {
   beforeAll(async () => {
-    await query(`create schema if not exists ${schema}`);
     execFileSync("node", ["scripts/db-migrate.mjs"], { cwd: repoRoot, env: process.env, stdio: "pipe" });
     __setMarketFetchers({ candles: async () => candles(), ticker: async (productId) => ticker(productId) });
   });
@@ -82,7 +75,6 @@ describe.skipIf(!enabled)("services", () => {
   afterAll(async () => {
     __setMarketFetchers(null);
     await rm(path.resolve(repoRoot, scratchDir), { recursive: true, force: true });
-    await query(`drop schema if exists ${schema} cascade`);
     await closePool();
   });
 
