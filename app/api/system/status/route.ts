@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSystemStatus } from "@/lib/server/system-status";
 
-export function GET() {
-  return NextResponse.json(getSystemStatus());
+export async function GET() {
+  return NextResponse.json(await getSystemStatus());
 }
