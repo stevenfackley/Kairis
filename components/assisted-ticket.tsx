@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { previewAssistedAction, submitAssistedAction } from "@/app/app/trade/actions";
 import { CUSTOM_PRODUCT, isWatchlistProduct } from "@/app/app/trade/order-form";
-import { INITIAL_PREVIEW, INITIAL_SUBMIT, PREVIEW_TTL_SECONDS, type SubmitState } from "@/app/app/trade/state";
+import { INITIAL_PREVIEW, INITIAL_SUBMIT, PREVIEW_TTL_SECONDS, freshestOrder, ticketStep } from "@/app/app/trade/state";
 import { RiskDecisionView } from "@/components/risk-decision";
 import { WATCHLIST } from "@/lib/domain/strategy";
 import { describeSize } from "@/lib/exchange/sizing";
@@ -20,6 +20,8 @@ type TicketProps = {
   defaultSide: Side;
   defaultQuote: string;
   signalId: string | null;
+  /** The page's recent orders, so a result line follows the order through Reconcile. */
+  recentOrders: AssistedOrder[];
 };
 
 const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> = {
@@ -129,27 +131,16 @@ function PreviewPanel({ preview, order }: { preview: OrderPreview; order: Assist
   );
 }
 
-function ResultPanel({ state, onReset }: { state: Exclude<SubmitState, { step: "idle" }>; onReset: () => void }) {
+function ResultPanel({ order, onReset }: { order: AssistedOrder; onReset: () => void }) {
   return (
     <section className="ticket-result" aria-live="polite">
-      {state.step === "result" ? (
-        <>
-          <p className="ticket-summary">
-            <span className={`pill ${STATUS_PILL[state.order.status]}`}>{state.order.status}</span>{" "}
-            {state.order.side} {state.order.productId} {usd(state.order.quoteUsd)}
-          </p>
-          <p className={state.order.status === "submitted" || state.order.status === "filled" ? "success-copy" : "error-copy"} role="status">
-            {resultCopy(state.order)}
-          </p>
-          {state.order.status === "blocked" && state.order.riskDecision ? (
-            <RiskDecisionView decision={state.order.riskDecision} title="Risk checks at submit" />
-          ) : null}
-        </>
-      ) : (
-        <p className="error-copy" role="alert">
-          {state.error}
-        </p>
-      )}
+      <p className="ticket-summary">
+        <span className={`pill ${STATUS_PILL[order.status]}`}>{order.status}</span> {order.side} {order.productId} {usd(order.quoteUsd)}
+      </p>
+      <p className={order.status === "submitted" || order.status === "filled" ? "success-copy" : "error-copy"} role="status">
+        {resultCopy(order)}
+      </p>
+      {order.status === "blocked" && order.riskDecision ? <RiskDecisionView decision={order.riskDecision} title="Risk checks at submit" /> : null}
       <div className="button-row">
         <button type="button" className="cta-secondary" onClick={onReset}>
           Start another
@@ -159,7 +150,7 @@ function ResultPanel({ state, onReset }: { state: Exclude<SubmitState, { step: "
   );
 }
 
-function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide, defaultQuote, signalId, onReset }: TicketProps & { onReset: () => void }) {
+function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide, defaultQuote, signalId, recentOrders, onReset }: TicketProps & { onReset: () => void }) {
   const [previewState, previewAction, previewing] = useActionState(previewAssistedAction, INITIAL_PREVIEW);
   const [submitState, submitAction, submitting] = useActionState(submitAssistedAction, INITIAL_SUBMIT);
 
@@ -174,7 +165,7 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
   const secondsLeft = useSecondsLeft(previewed ? previewed.order.id : null);
   const expired = previewed !== null && secondsLeft === 0;
 
-  const step = submitState.step !== "idle" ? 3 : previewState.step === "previewed" || previewState.step === "blocked" ? 2 : 1;
+  const step = ticketStep(previewState, submitState);
   const order = previewState.step === "previewed" || previewState.step === "blocked" ? previewState.order : null;
 
   return (
@@ -300,6 +291,11 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
       {step === 2 && previewed ? (
         <form action={submitAction} className="ticket-form">
           <input type="hidden" name="orderId" value={previewed.order.id} />
+          {submitState.step === "error" ? (
+            <p className="error-copy" role="alert">
+              {submitState.error}
+            </p>
+          ) : null}
           {previewed.order.provider === "coinbase" && !liveSubmitEnabled ? (
             <p className="error-copy">
               Live submission is disabled by environment policy. Submitting records a blocked attempt and sends nothing to
@@ -325,7 +321,7 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
         </form>
       ) : null}
 
-      {submitState.step !== "idle" ? <ResultPanel state={submitState} onReset={onReset} /> : null}
+      {submitState.step === "result" ? <ResultPanel order={freshestOrder(submitState.order, recentOrders)} onReset={onReset} /> : null}
     </div>
   );
 }

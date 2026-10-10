@@ -57,7 +57,7 @@ describe("mock exchange", () => {
   it("creates and then reports a filled order", async () => {
     const c = makeClient();
     const r = await c.createOrder({ productId: "BTC-USD", side: "BUY", size: { kind: "quote", quoteSize: "50" }, clientOrderId: "c-fill" });
-    expect(r).toMatchObject({ success: true, clientOrderId: "c-fill", failureReason: null, detail: "Mock order accepted for BUY BTC-USD with quote size 50." });
+    expect(r).toMatchObject({ success: true, clientOrderId: "c-fill", failureReason: null, detail: "Mock order accepted: spend $50.00 (BTC-USD)." });
     expect(await c.getOrder(r.orderId!)).toEqual({
       orderId: r.orderId,
       status: "FILLED",

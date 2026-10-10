@@ -1,5 +1,5 @@
 import { describeOrderFailure, describePreviewFailure } from "@/lib/exchange/reasons";
-import { sizeViolations, type ProductRules } from "@/lib/exchange/sizing";
+import { describeSize, sizeViolations, type ProductRules } from "@/lib/exchange/sizing";
 import type { ExchangeClient, OrderInput, OrderStatus } from "@/lib/exchange/types";
 
 const round8 = (n: number) => Math.round(n * 1e8) / 1e8;
@@ -85,13 +85,12 @@ export function createMockClient(
       const orderId = idFactory();
       issued.set(orderId, { orderId, status: "FILLED", filledSize: baseSize, averagePrice: price, totalFees: commission, raw: "FILLED" });
       byClientId.set(input.clientOrderId, orderId);
-      const sized = input.size.kind === "quote" ? `quote size ${input.size.quoteSize}` : `base size ${input.size.baseSize}`;
       return {
         success: true,
         orderId,
         clientOrderId: input.clientOrderId,
         failureReason: null,
-        detail: `Mock order accepted for ${input.side} ${input.productId} with ${sized}.`
+        detail: `Mock order accepted: ${describeSize(input.size, input.productId)} (${input.productId}).`
       };
     },
     async findOrderByClientId(lookup) {
