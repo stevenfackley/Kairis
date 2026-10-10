@@ -17,7 +17,7 @@ import {
 import { appendAudit } from "@/lib/server/repos/audit";
 import { getConnectionStatus, getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getReferencePrice } from "@/lib/server/services/market";
-import { checkOrder } from "@/lib/server/services/risk";
+import { buildRiskContext, checkOrder } from "@/lib/server/services/risk";
 import { errorMessage, storableUsd } from "@/lib/server/services/shared";
 import type { AssistedOrder, OrderIntent, RiskDecision } from "@/lib/types";
 
@@ -73,11 +73,31 @@ async function availableBase(client: ExchangeClient, currency: string): Promise<
   }
 }
 
+const floorCents = (n: number) => Math.floor(n * 100) / 100;
+
+/** closePosition sells the whole recorded position by coin amount; quoteUsd is then ignored. */
+export type AssistedPreviewIntent = Omit<OrderIntent, "mode"> & { closePosition?: boolean };
+
 export async function previewAssisted(
   userId: string,
-  intent: Omit<OrderIntent, "mode">
+  intent: AssistedPreviewIntent
 ): Promise<{ decision: RiskDecision; order: AssistedOrder; preview: OrderPreview | null }> {
-  const live: OrderIntent = { ...intent, mode: "live" };
+  // Closing a position: the size is the held coins; the dollar figure (rounded down to the cent, so it
+  // never exceeds the position) only feeds the risk checks and the record.
+  let closeBase: number | null = null;
+  let quoteUsd = intent.quoteUsd;
+  if (intent.closePosition) {
+    const held = await buildRiskContext(userId, "live", intent.productId);
+    closeBase = Math.max(0, held.positions[intent.productId]?.baseSize ?? 0);
+    quoteUsd = closeBase > 0 && held.referencePrice > 0 ? floorCents(closeBase * held.referencePrice) : 0;
+  }
+  const live: OrderIntent = {
+    productId: intent.productId,
+    side: intent.closePosition ? "SELL" : intent.side,
+    quoteUsd,
+    mode: "live",
+    signalId: intent.signalId ?? null
+  };
   const { decision, context } = await checkOrder(userId, live);
   const client = await getExchangeClient(userId);
   const base: AssistedOrder = {
@@ -136,7 +156,7 @@ export async function previewAssisted(
     throw new Error(message);
   }
   const available = client.provider === "coinbase" && live.side === "SELL" ? await availableBase(client, rules.baseCurrency) : null;
-  const sizing = sizeMarketOrder({ side: live.side, quoteUsd: live.quoteUsd, price: context.referencePrice, rules, availableBase: available });
+  const sizing = sizeMarketOrder({ side: live.side, quoteUsd: live.quoteUsd, price: context.referencePrice, rules, availableBase: available, baseSize: closeBase });
   if (!sizing.ok) {
     return block(sizing.reason, withFailedCheck(decision, "exchange-rules", sizing.reason));
   }
@@ -165,12 +185,22 @@ export async function previewAssisted(
     orderSize: sizing.size,
     detail: [
       `Previewed: ${describeSize(sizing.size, live.productId)}, order total ${usd(preview.orderTotal)} including ${usd(preview.commissionTotal)} commission.`,
+      intent.closePosition ? `Closing the whole ${live.productId} position.` : null,
       sizing.note
     ]
       .filter(Boolean)
       .join(" ")
   });
   return { decision, order: await record(userId, order, "previewed"), preview };
+}
+
+async function currentValue(productId: string, baseSize: string, fallback: number): Promise<number> {
+  try {
+    const mark = await getReferencePrice(productId);
+    return mark > 0 ? floorCents(Number(baseSize) * mark) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // The Kairis order id doubles as the Coinbase client_order_id, so a retried submit cannot double-fill.
@@ -214,11 +244,13 @@ export async function submitAssisted(userId: string, orderId: string): Promise<A
       return { settled: await block(NO_SIZE_DETAIL) };
     }
 
-    // Limits are re-checked at submit time: fills or a pause since the preview must win.
+    // Limits are re-checked at submit time: fills or a pause since the preview must win. A coin-sized
+    // sell is valued at today's price: the coins sent are fixed, their dollar value is not.
+    const quoteUsd = order.side === "SELL" && order.orderSize.kind === "base" ? await currentValue(order.productId, order.orderSize.baseSize, order.quoteUsd) : order.quoteUsd;
     const { decision } = await checkOrder(userId, {
       productId: order.productId,
       side: order.side,
-      quoteUsd: order.quoteUsd,
+      quoteUsd,
       mode: "live",
       signalId: order.signalId
     });

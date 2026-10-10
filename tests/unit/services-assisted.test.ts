@@ -237,6 +237,52 @@ describe("previewAssisted", () => {
       expect(result.order.detail).toContain("Sized down from 0.01 to the 0.00995 BTC available on Coinbase.");
     });
 
+    it("closes the whole position by base size, not by a dollar amount", async () => {
+      const { previewAssisted } = await load(true);
+      const previewOrder = vi.fn(async () => cleanPreview());
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder, balances: vi.fn(async () => [{ currency: "BTC", available: 0.01 }]) }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
+
+      expect(previewOrder).toHaveBeenCalledWith({ productId: "BTC-USD", side: "SELL", size: { kind: "base", baseSize: "0.01" } });
+      expect(result.decision.outcome).toBe("approved");
+      expect(result.order).toMatchObject({ status: "previewed", side: "SELL", quoteUsd: 500, orderSize: { kind: "base", baseSize: "0.01" } });
+      expect(result.order.detail).toContain("Closing the whole BTC-USD position.");
+    });
+
+    it("blocks closing a position Kairis has no record of", async () => {
+      const { previewAssisted } = await load(true);
+      m.listAssistedOrders.mockResolvedValue([]);
+      const previewOrder = vi.fn();
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
+
+      expect(previewOrder).not.toHaveBeenCalled();
+      expect(result.order.status).toBe("blocked");
+      expect(result.decision.reasons).toContain("There is no position in BTC-USD to sell.");
+    });
+
+    it("values a base-sized sell at the current price when limits are re-checked at submit", async () => {
+      const { submitAssisted } = await load(true);
+      // Previewed at $500 for 0.01 BTC; the price has since fallen 2%, so $500 now exceeds the $490 held.
+      current = order({ provider: "coinbase", side: "SELL", quoteUsd: 500, orderSize: { kind: "base", baseSize: "0.01" } });
+      m.getReferencePrices.mockResolvedValue({ "BTC-USD": 49000 });
+      m.getReferencePrice.mockResolvedValue(49000);
+      m.getMarketSnapshot.mockImplementation(async (productId: string) => ({
+        candles: [],
+        ticker: { productId, price: 49000, bestBid: 48999, bestAsk: 49001, tradeTime: Date.now() },
+        fetchedAt: Date.now()
+      }));
+      const createOrder = vi.fn(async () => ({ success: true, orderId: "cb-close", clientOrderId: ORDER_ID, failureReason: null, detail: "Coinbase accepted the order." }));
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { createOrder }));
+
+      const result = await submitAssisted(USER, ORDER_ID);
+
+      expect(result).toMatchObject({ status: "submitted", orderId: "cb-close" });
+      expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ size: { kind: "base", baseSize: "0.01" } }));
+    });
+
     it("blocks a live SELL Coinbase cannot cover without calling preview", async () => {
       const { previewAssisted } = await load(true);
       const previewOrder = vi.fn();

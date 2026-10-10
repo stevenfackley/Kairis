@@ -265,7 +265,15 @@ function TicketRound({ provider, liveSubmitEnabled, defaultProduct, defaultSide,
             <button type="submit" className="cta-primary button-reset" disabled={previewing}>
               {previewing ? "Checking limits and previewing..." : "Check risk and preview"}
             </button>
+            {/* The size is the held coin amount, so the dollar field's validation does not apply. */}
+            <button type="submit" name="closePosition" value="yes" className="cta-secondary" disabled={previewing} formNoValidate>
+              Sell entire position
+            </button>
           </div>
+          <p className="field-help">
+            Sell entire position previews a sell of every coin Kairis recorded for the selected product, sized in coins
+            (rounded down to the coin&apos;s smallest step on Coinbase) and capped at what Coinbase shows available.
+          </p>
         </form>
       ) : null}
 
