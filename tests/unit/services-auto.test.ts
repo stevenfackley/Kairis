@@ -101,6 +101,18 @@ describe("runAutoCycle", () => {
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "auto", "cycle", JSON.stringify(summary));
   });
 
+  it("sizes an entry no larger than the product's per-symbol cap", async () => {
+    const { runAutoCycle } = await load({ auto: true, live: true });
+    m.getLimits.mockResolvedValue({ ...limits, perSymbolMaxUsd: { "BTC-USD": 300 } });
+    m.refreshSignals.mockResolvedValue([signal("BTC-USD", "long", 2)]);
+    m.previewAssisted.mockResolvedValue({ decision: { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" }, order: { id: "order-1" }, preview: null });
+    m.submitAssisted.mockResolvedValue({ status: "submitted", detail: "ok" } satisfies Partial<AssistedOrder>);
+
+    await runAutoCycle(USER, { isOwner: true });
+
+    expect(m.previewAssisted).toHaveBeenCalledWith(USER, { productId: "BTC-USD", side: "BUY", quoteUsd: 300, signalId: "sig-BTC-USD" });
+  });
+
   describe("exits", () => {
     const approved = { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" };
 

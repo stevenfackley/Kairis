@@ -33,7 +33,7 @@ export async function runAutoCycle(userId: string, caller: { isOwner: boolean })
     if (signal.action !== "long") {
       continue;
     }
-    const quoteUsd = suggestedQuoteUsd(limits, signal.atrPct);
+    const quoteUsd = suggestedQuoteUsd(limits, signal.atrPct, signal.productId);
     if (quoteUsd <= 0) {
       summary.skipped.push(`${signal.productId}: no ATR-based size available.`);
       continue;
