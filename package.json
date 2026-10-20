@@ -16,25 +16,25 @@
     "db:down": "docker compose -f compose.dev.yaml down"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1140.0",
-    "@coinbase/cdp-sdk": "^1.56.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "@coinbase/cdp-sdk": "^1.59.0",
     "@qavren/auth-next": "^0.1.2",
-    "next": "^16.3.8",
+    "next": "^16.4.2",
     "next-auth": "^5.0.0-beta.32",
     "pg": "^8.23.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "eslint": "^10.12.0",
-    "eslint-config-next": "^16.4.0",
-    "typescript": "^5.8.3",
-    "vitest": "^5.0.3"
+    "eslint": "^10.13.0",
+    "eslint-config-next": "^16.4.2",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
   },
   "engines": {
     "node": ">=22.0.0"
