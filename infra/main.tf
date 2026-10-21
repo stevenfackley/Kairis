@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.8" # moved blocks across resource types (cloudflare v5 renames)
 
   required_providers {
     aws = {
@@ -8,7 +8,7 @@ terraform {
     }
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
+      version = "~> 5.28"
     }
     random = {
       source  = "hashicorp/random"
