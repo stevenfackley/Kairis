@@ -41,13 +41,6 @@ resource "cloudflare_dns_record" "web" {
   ttl     = 1 # automatic; required in provider v5
 }
 
-# Provider v5 renamed cloudflare_record to cloudflare_dns_record; the provider's MoveState handler carries the
-# existing record over. Needs Terraform >= 1.8. Safe to delete after the first successful apply on v5.
-moved {
-  from = cloudflare_record.web
-  to   = cloudflare_dns_record.web
-}
-
 # The tunnel token reaches the host at deploy time via SSM Parameter Store; never via GitHub secrets.
 resource "aws_ssm_parameter" "tunnel_token" {
   name  = "/${var.app}/prod/tunnel_token"
