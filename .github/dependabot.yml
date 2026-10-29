@@ -7,6 +7,7 @@ updates:
     groups:
       npm-all:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # TypeScript 7.0 is the native "Corsa" rewrite — a breaking major that
       # fails typecheck (Dependabot #85, closed 2026-07-13). Allow 6.x, block 7+.
@@ -17,6 +18,10 @@ updates:
     directory: /
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    groups:
+      docker-all:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -25,8 +30,13 @@ updates:
     groups:
       actions-all:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: terraform
     directory: /infra
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    groups:
+      terraform-all:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

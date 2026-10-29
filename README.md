@@ -44,9 +44,8 @@ This repository is proprietary and is not open source. See [LICENSE](LICENSE) fo
 Limits: Coinbase only, spot only. P&L and limits only see trades made through Kairis. Exports written
 to the container's local disk are lost on redeploy unless R2 is configured.
 
-Production is `https://kairis.qavrensolutions.com` on the shared Qavren hub. It goes live when the owner
-completes the one-time steps in [docs/deployment.md](docs/deployment.md). Live submission and auto mode
-ship disabled.
+Production is live at `https://kairis.qavrensolutions.com` on the shared Qavren hub (since 2026-10-10;
+setup steps in [docs/deployment.md](docs/deployment.md)). Live submission and auto mode ship disabled.
 
 ## Screens
 

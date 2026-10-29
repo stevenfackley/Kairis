@@ -3,7 +3,7 @@
 > Disciplined, non-custodial crypto trading: signals with rationale, a risk engine, paper and assisted Coinbase trading.
 
 ## Stack
-- Next.js 16 App Router, React 19, TypeScript 5.8 strict, standalone output
+- Next.js 16 App Router, React 19, TypeScript 6 strict, standalone output
 - Identity: qavren-auth Keycloak realm `kairis` (`kairis-dev` locally) via `@qavren/auth-next` + `next-auth` v5
 - Database: qavren-db shared Postgres, schema/role `kairis`, `pg`; prod runtime goes through the :6543 transaction pooler
 - Exchange: Coinbase Advanced Trade REST; `@coinbase/cdp-sdk` for auth (JWT signing) only

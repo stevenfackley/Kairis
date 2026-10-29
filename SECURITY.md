@@ -5,7 +5,7 @@ Report privately through GitHub Security Advisories. Reports are acknowledged wi
 ## Rules
 
 - No static AWS keys. GitHub Actions authenticates to AWS with OIDC only.
-- No telemetry SDKs. A secret-shape scan (`scripts/scan-secrets.ps1`) runs on every PR.
+- No telemetry SDKs. A secret-shape scan (`scripts/scan-secrets.ps1`) is a required local check before pushing.
 - Exchange secrets are stored AES-256-GCM encrypted under `KAIRIS_SECRET_KEY`. They are never logged
   or returned to the browser. Rotating the key means users reconnect their exchange keys.
 - Transfer-capable exchange keys are rejected. Withdrawals are never requested.

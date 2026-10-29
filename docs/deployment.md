@@ -113,7 +113,7 @@ Already set on 2026-10-10 (environment `Prod`): variable `DOTENV_CONTENT` (the b
 variables `R2_ACCOUNT_ID`, `R2_BUCKET=kairis-prod`, `R2_PUBLIC_URL` (empty), secrets
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `AUTH_SECRET`, `KAIRIS_SECRET_KEY`.
 
-Still to set, from step b's output:
+Set on 2026-10-10 from step b's output (re-run after a password rotation):
 
     gh secret set DATABASE_URL --env Prod --repo stevenfackley/Kairis --body "<pooler_url, port 6543>"
     gh secret set QAVREN_DB_PROD_SESSION_URL --env Prod --repo stevenfackley/Kairis --body "<session_url, port 5432>"
