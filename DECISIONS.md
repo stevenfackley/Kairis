@@ -50,3 +50,10 @@ ADR log. Append-only.
 **Context:** Kairis must stay non-custodial and must not be able to move user funds.
 **Decision:** Each user connects their own Coinbase key. Kairis validates it with `key_permissions` and rejects transfer-capable keys. The private key is sealed with AES-256-GCM under `KAIRIS_SECRET_KEY`. Live submission is blocked unless `ENABLE_LIVE_ASSISTED_TRADING=true`.
 **Consequences:** Rotating `KAIRIS_SECRET_KEY` orphans stored keys; users reconnect. The auto cycle needs `ENABLE_AUTO_MODE` as well and is owner-only.
+
+## 2026-11-02 minimatch 10 -> 11 by scoped override
+
+**Status:** accepted
+**Context:** GHSA-g3hv-75wg-m249 (globparts DoS, medium) is fixed only in minimatch 11.0.1+. Every consumer in this tree (eslint, @eslint/config-array, @typescript-eslint/typescript-estree) still declares `^10.2.x`, even at their latest releases, so no plain update can reach 11.
+**Decision:** `"minimatch@10": "^11.0.4"` in `overrides`, the same scoped pattern as `brace-expansion@N` and `sharp@0`. Development scope only. The nested 3.1.5 copy under eslint-config-next (eslint-plugin-import/jsx-a11y/react) is left alone: those plugins call minimatch 3's callable default export, which 11 does not provide.
+**Consequences:** minimatch 11 drops `makeRe()`, `Minimatch#regexp`, the `AST` class, `matchOne()` and the `debug` option; none of the three consumers use them, and `npm run lint` on CI is the regression check. Drop the override once the consumers declare `^11` themselves.
