@@ -49,6 +49,6 @@
     "sharp@0": "^0.35.5",
     "source-map-js": "^1.2.2",
     "undici": "^7.29.0",
-    "minimatch@10": "^11.0.4"
+    "minimatch": "^11.0.4"
   }
 }
