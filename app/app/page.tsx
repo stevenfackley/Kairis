@@ -55,7 +55,7 @@ export default async function DashboardPage() {
   const now = new Date();
   const nowMs = now.getTime();
   const today = dayStats(paperTrades, now);
-  const mode: TradeMode = connection && env.liveAssistedTradingEnabled ? "live" : "paper";
+  const mode: TradeMode = connection && env.secretKey && env.liveAssistedTradingEnabled ? "live" : "paper";
   const capCount = Object.keys(limits.perSymbolMaxUsd).length;
   const recentOrders = assistedOrders.slice(0, 5);
   const topSignals = signals.slice(0, 3);
