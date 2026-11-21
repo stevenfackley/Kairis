@@ -194,15 +194,15 @@ export async function claimPreviewedOrder(id: string, userId: string): Promise<A
 }
 
 // Closes previews the user walked away from: never claimed for submit and older than the cutoff.
-export async function expireStalePreviews(userId: string, createdBefore: string, detail: string): Promise<number> {
-  const rows = await query<{ id: string }>(
+export async function expireStalePreviews(userId: string, createdBefore: string, detail: string): Promise<AssistedOrder[]> {
+  const rows = await query<AssistedOrderRow>(
     `update assisted_orders
         set status = 'expired', reconcile_state = 'reconciled', reconciled_at = now(), detail = $3, updated_at = now()
       where user_id = $1 and status = 'previewed' and submit_claimed_at is null and created_at < $2::timestamptz
-      returning id`,
+      returning ${COLUMNS}`,
     [userId, createdBefore, detail]
   );
-  return rows.length;
+  return rows.map(mapAssistedOrder);
 }
 
 // Frees a claim taken by claimPreviewedOrder when submission failed before reaching the exchange.

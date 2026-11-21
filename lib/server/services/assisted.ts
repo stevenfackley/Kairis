@@ -72,7 +72,9 @@ const floorCents = (n: number) => Math.floor(n * 100) / 100;
 
 /** A preview left behind (the user navigated away) would otherwise stay "previewed" forever. */
 async function expireAbandoned(userId: string): Promise<void> {
-  await expireStalePreviews(userId, new Date(Date.now() - PREVIEW_TTL_MS).toISOString(), ABANDONED_DETAIL);
+  for (const expired of await expireStalePreviews(userId, new Date(Date.now() - PREVIEW_TTL_MS).toISOString(), ABANDONED_DETAIL)) {
+    await record(userId, expired, "expired");
+  }
 }
 
 /** closePosition sells the whole recorded position by coin amount; quoteUsd is then ignored. */
@@ -460,22 +462,29 @@ export async function reconcileAssisted(userId: string): Promise<{ checked: numb
   for (const order of pending) {
     checked += 1;
     const now = new Date().toISOString();
+    let settled: AssistedOrder | null = null;
     try {
       const status = await exchangeStatus(await clientFor(order.provider), order);
       if (!status) {
         // Unconfirmed and not on Coinbase: give it a few minutes (listing can lag), then close it out.
         const gaveUp = Date.now() - Date.parse(order.createdAt) > UNCONFIRMED_GIVE_UP_MS;
-        await updateAssistedOrder(
+        const next = await updateAssistedOrder(
           order.id,
           gaveUp ? { status: "failed", reconcileState: "reconciled", reconciledAt: now, detail: NOT_PLACED_DETAIL } : { detail: NOT_FOUND_YET_DETAIL }
         );
-        if (gaveUp) updated += 1;
-        continue;
-      }
-      const patch = reconcilePatch(order, status, now);
-      await updateAssistedOrder(order.id, order.orderId ? patch : { ...patch, orderId: status.orderId });
-      if (patch.status !== undefined || patch.reconcileState !== undefined) {
-        updated += 1;
+        if (gaveUp) {
+          settled = next;
+          updated += 1;
+        }
+      } else {
+        const patch = reconcilePatch(order, status, now);
+        const next = await updateAssistedOrder(order.id, order.orderId ? patch : { ...patch, orderId: status.orderId });
+        if (patch.status !== undefined) {
+          settled = next;
+        }
+        if (patch.status !== undefined || patch.reconcileState !== undefined) {
+          updated += 1;
+        }
       }
     } catch (error) {
       // A rate limit or provider outage leaves the order queued for the next pass; anything else
@@ -488,6 +497,11 @@ export async function reconcileAssisted(userId: string): Promise<{ checked: numb
         await updateAssistedOrder(order.id, { reconcileState: "error", reconciledAt: now, detail: message });
         updated += 1;
       }
+    }
+    // A status change gets its own row, as in settle. Written outside the try so a failed audit write
+    // is not handled as an exchange error, which would mark the order just settled as a reconcile error.
+    if (settled) {
+      await record(userId, settled, settled.status);
     }
   }
   await appendAudit(userId, "operations", "reconcile-assisted-orders", `Checked ${checked}, updated ${updated}.`);
