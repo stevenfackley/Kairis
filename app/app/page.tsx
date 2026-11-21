@@ -28,8 +28,8 @@ const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> 
   filled: "pill-ok",
   previewed: "pill-warn",
   submitted: "pill-warn",
-  cancelled: "pill-warn",
-  expired: "pill-warn",
+  cancelled: "pill-bad",
+  expired: "pill-bad",
   blocked: "pill-bad",
   failed: "pill-bad"
 };
