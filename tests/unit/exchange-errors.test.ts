@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ExchangeHttpError, ExchangeTransportError, describeHttpFailure, normalizeExchangeError, scrubSecrets } from "@/lib/exchange/errors";
+import {
+  ExchangeHttpError,
+  ExchangeTransportError,
+  describeHttpFailure,
+  isUnknownProductResponse,
+  normalizeExchangeError,
+  scrubSecrets
+} from "@/lib/exchange/errors";
 import { CoinbaseKeyFormatError } from "@/lib/exchange/keys";
 
 describe("describeHttpFailure", () => {
@@ -79,5 +86,41 @@ describe("normalizeExchangeError", () => {
   it("never echoes secrets in the message", () => {
     const n = normalizeExchangeError(new Error("Failed: -----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"));
     expect(n.message).toBe("Failed: [redacted key]");
+  });
+});
+
+describe("isUnknownProductResponse", () => {
+  const http = (status: number, body: string | null) => new ExchangeHttpError(status, `HTTP ${status}`, null, body);
+
+  it("counts a 404 under either rule", () => {
+    expect(isUnknownProductResponse(http(404, null), "any")).toBe(true);
+    expect(isUnknownProductResponse(http(404, "gone"), "about-product")).toBe(true);
+  });
+
+  it("counts any 400 on 'any' but only a 400 about the product on 'about-product'", () => {
+    expect(isUnknownProductResponse(http(400, "granularity is invalid"), "any")).toBe(true);
+    expect(isUnknownProductResponse(http(400, null), "any")).toBe(true);
+    expect(isUnknownProductResponse(http(400, '{"message":"ProductID is invalid"}'), "about-product")).toBe(true);
+    expect(isUnknownProductResponse(http(400, "granularity is invalid"), "about-product")).toBe(false);
+    expect(isUnknownProductResponse(http(400, null), "about-product")).toBe(false);
+  });
+
+  it("reads the status and body, not the message", () => {
+    const worded = new ExchangeHttpError(503, "Coinbase public request failed (404): product not found", null, "product not found");
+    expect(isUnknownProductResponse(worded, "any")).toBe(false);
+    expect(isUnknownProductResponse(new Error("Coinbase public request failed (404): product not found"), "any")).toBe(false);
+  });
+
+  it("treats rate limits, outages and transport failures as not an unknown product", () => {
+    for (const status of [401, 403, 429, 500, 503]) {
+      expect(isUnknownProductResponse(http(status, "product"), "any")).toBe(false);
+    }
+    expect(isUnknownProductResponse(new ExchangeTransportError("timeout", "x"), "any")).toBe(false);
+    expect(isUnknownProductResponse("weird", "any")).toBe(false);
+  });
+
+  it("recognises the error by name when the module is loaded twice", () => {
+    const twin = Object.assign(new Error("HTTP 404"), { name: "ExchangeHttpError", status: 404, body: null });
+    expect(isUnknownProductResponse(twin, "any")).toBe(true);
   });
 });

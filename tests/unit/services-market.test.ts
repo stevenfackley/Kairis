@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { STRATEGY } from "@/lib/domain/strategy";
+import { ExchangeHttpError } from "@/lib/exchange/errors";
 import {
   __clearMarketCache,
   __setMarketFetchers,
@@ -13,6 +14,11 @@ import type { Candle, Ticker } from "@/lib/types";
 
 function ticker(productId: string, price: number): Ticker {
   return { productId, price, bestBid: price, bestAsk: price, tradeTime: Date.now() };
+}
+
+// What the public fetchers throw on a non-2xx answer.
+function publicFailure(status: number, body: string): ExchangeHttpError {
+  return new ExchangeHttpError(status, `Coinbase public request failed (${status}): ${body}`, null, body);
 }
 
 afterEach(() => {
@@ -116,8 +122,8 @@ describe("market snapshot cache", () => {
   it("reports a product Coinbase does not list as an UnknownProductError, and an outage as a plain error", async () => {
     __setMarketFetchers({
       candles: async (productId) => {
-        if (productId === "ZZZZ-USD") throw new Error('Coinbase public request failed (404): {"error":"NOT_FOUND","message":"product ZZZZ-USD not found"}');
-        if (productId === "QQQQ-USD") throw new Error('Coinbase public request failed (400): {"error":"INVALID_ARGUMENT","message":"ProductID is invalid"}');
+        if (productId === "ZZZZ-USD") throw publicFailure(404, '{"error":"NOT_FOUND","message":"product ZZZZ-USD not found"}');
+        if (productId === "QQQQ-USD") throw publicFailure(400, '{"error":"INVALID_ARGUMENT","message":"ProductID is invalid"}');
         if (productId === "DOWN-USD") throw new Error("Coinbase public request failed (503): upstream unavailable");
         throw new Error("Coinbase public request timed out after 8 s");
       },

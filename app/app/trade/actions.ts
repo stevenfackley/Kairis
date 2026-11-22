@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { isUuid, parseAssistedForm } from "@/app/app/trade/order-form";
+import { parseAssistedForm } from "@/app/app/trade/order-form";
 import type { PreviewState, SubmitState } from "@/app/app/trade/state";
+import { isUuid } from "@/lib/domain/order-form";
 import { previewAssisted, reconcileAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
 import { errorMessage } from "@/lib/server/services/shared";
 import { requireOnboarded } from "@/lib/server/session";

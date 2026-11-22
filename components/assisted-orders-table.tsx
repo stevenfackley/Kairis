@@ -1,15 +1,6 @@
+import { ASSISTED_STATUS } from "@/lib/domain/assisted-status";
 import { short, usd, when } from "@/lib/format";
-import type { AssistedOrder, AssistedStatus, ReconcileState } from "@/lib/types";
-
-const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> = {
-  filled: "pill-ok",
-  previewed: "pill-warn",
-  submitted: "pill-warn",
-  blocked: "pill-bad",
-  failed: "pill-bad",
-  cancelled: "pill-bad",
-  expired: "pill-bad"
-};
+import type { AssistedOrder, ReconcileState } from "@/lib/types";
 
 const RECONCILE_PILL: Record<ReconcileState, "pill-ok" | "pill-warn" | "pill-bad"> = {
   reconciled: "pill-ok",
@@ -47,7 +38,7 @@ export function AssistedOrdersTable({ orders }: { orders: AssistedOrder[] }) {
               <td>{order.side}</td>
               <td className="num">{usd(order.quoteUsd)}</td>
               <td>
-                <span className={`pill ${STATUS_PILL[order.status]}`}>{order.status}</span>
+                <span className={`pill ${ASSISTED_STATUS[order.status].tone}`}>{order.status}</span>
               </td>
               <td>
                 <span className={`pill ${RECONCILE_PILL[order.reconcileState]}`}>{order.reconcileState}</span>
