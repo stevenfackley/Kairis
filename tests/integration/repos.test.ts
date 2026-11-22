@@ -261,7 +261,9 @@ describe.skipIf(!enabled)("repos", () => {
     const fresh = await insertAssistedOrder(assisted({ status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null }));
     const other = await insertAssistedOrder(assisted({ userId: "user-2", status: "previewed", reconcileState: "pending", orderId: null, clientOrderId: null, createdAt: old }));
 
-    expect(await expireStalePreviews(USER, "2026-10-10T11:00:00.000Z", "Preview expired.")).toBe(1);
+    const expired = await expireStalePreviews(USER, "2026-10-10T11:00:00.000Z", "Preview expired.");
+    expect(expired.map((o) => o.id)).toEqual([stale.id]);
+    expect(expired[0]).toMatchObject({ status: "expired", side: stale.side, productId: stale.productId, quoteUsd: stale.quoteUsd });
 
     expect(await getAssistedOrder(stale.id, USER)).toMatchObject({ status: "expired", reconcileState: "reconciled", detail: "Preview expired." });
     expect((await getAssistedOrder(stale.id, USER))?.reconciledAt).not.toBeNull();
