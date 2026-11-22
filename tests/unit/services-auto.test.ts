@@ -169,6 +169,29 @@ describe("runAutoCycle", () => {
     expect(summary).toMatchObject({ previewed: 2, submitted: 1, skipped: ["ETH-USD: Coinbase reported CANCELLED; nothing was filled."] });
   });
 
+  it("counts an order as sent only when it settles submitted or filled, for every status", async () => {
+    const statuses: Record<AssistedOrder["status"], boolean> = {
+      previewed: false,
+      submitted: true,
+      filled: true,
+      blocked: false,
+      failed: false,
+      cancelled: false,
+      expired: false
+    };
+    for (const [status, sent] of Object.entries(statuses)) {
+      const { runAutoCycle } = await load({ auto: true, live: true });
+      m.refreshSignals.mockResolvedValue([signal("BTC-USD", "long", 2)]);
+      m.previewAssisted.mockResolvedValue({ decision: { outcome: "approved", checks: [], reasons: [], evaluatedAt: "" }, order: { id: "order-1" }, preview: null });
+      m.submitAssisted.mockResolvedValue({ id: "order-1", status: "submitted", detail: "ok" });
+      m.settleAssisted.mockResolvedValue({ id: "order-1", status, detail: `settled ${status}` });
+
+      const summary = await runAutoCycle(USER, { isOwner: true });
+
+      expect(summary, status).toMatchObject(sent ? { submitted: 1, skipped: [] } : { submitted: 0, skipped: [`BTC-USD: settled ${status}`] });
+    }
+  });
+
   it("sizes an entry no larger than the product's per-symbol cap", async () => {
     const { runAutoCycle } = await load({ auto: true, live: true });
     m.getLimits.mockResolvedValue({ ...limits, perSymbolMaxUsd: { "BTC-USD": 300 } });
