@@ -11,12 +11,12 @@ import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { getLimits } from "@/lib/server/repos/limits";
 import { getOnboarding } from "@/lib/server/repos/onboarding";
 import { listPaperTrades } from "@/lib/server/repos/paper";
-import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
+import { getConnectionStatus, tradeMode } from "@/lib/server/services/exchange-connection";
 import { getReferencePrices } from "@/lib/server/services/market";
 import { HISTORY_LIMIT } from "@/lib/server/services/risk";
 import { latestSignalsWithSizing } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
-import type { AssistedStatus, ExecutionMode, SignalAction, TradeMode } from "@/lib/types";
+import type { AssistedStatus, ExecutionMode, SignalAction } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard | Kairis" };
 
@@ -55,7 +55,7 @@ export default async function DashboardPage() {
   const now = new Date();
   const nowMs = now.getTime();
   const today = dayStats(paperTrades, now);
-  const mode: TradeMode = connection && env.secretKey && env.liveAssistedTradingEnabled ? "live" : "paper";
+  const mode = tradeMode(connection);
   const capCount = Object.keys(limits.perSymbolMaxUsd).length;
   const recentOrders = assistedOrders.slice(0, 5);
   const topSignals = signals.slice(0, 3);
