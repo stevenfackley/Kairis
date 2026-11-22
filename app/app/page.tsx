@@ -4,6 +4,7 @@ import { togglePauseAction } from "@/app/app/actions";
 import { ModeBadge } from "@/components/mode-badge";
 import { PositionsTable } from "@/components/positions-table";
 import { evaluatedAgo, isSignalStale } from "@/components/signal-card";
+import { ASSISTED_STATUS } from "@/lib/domain/assisted-status";
 import { dayStats } from "@/lib/domain/paper";
 import { env } from "@/lib/env";
 import { short, usd, when } from "@/lib/format";
@@ -14,23 +15,13 @@ import { getConnectionStatus, tradeMode } from "@/lib/server/services/exchange-c
 import { loadPaperBook } from "@/lib/server/services/paper";
 import { latestSignalsWithSizing } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
-import type { AssistedStatus, ExecutionMode, SignalAction } from "@/lib/types";
+import type { ExecutionMode, SignalAction } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard | Kairis" };
 
 const MODE_LABEL: Record<ExecutionMode, string> = { paper: "Paper", manual: "Manual", assisted: "Assisted", auto: "Auto (owner)" };
 
 const ACTION_LABEL: Record<SignalAction, string> = { long: "Long setup", observe: "Observe", blocked: "Blocked" };
-
-const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> = {
-  filled: "pill-ok",
-  previewed: "pill-warn",
-  submitted: "pill-warn",
-  cancelled: "pill-bad",
-  expired: "pill-bad",
-  blocked: "pill-bad",
-  failed: "pill-bad"
-};
 
 function signedUsd(n: number): string {
   return n > 0 ? `+${usd(n)}` : usd(n);
@@ -249,7 +240,7 @@ export default async function DashboardPage() {
                     <td>{order.side}</td>
                     <td className="num">{usd(order.quoteUsd)}</td>
                     <td>
-                      <span className={`pill ${STATUS_PILL[order.status]}`}>{order.status}</span>
+                      <span className={`pill ${ASSISTED_STATUS[order.status].tone}`}>{order.status}</span>
                     </td>
                   </tr>
                 ))}

@@ -1,3 +1,4 @@
+import { ASSISTED_STATUS } from "@/lib/domain/assisted-status";
 import { ema } from "@/lib/domain/indicators";
 import { isFlat } from "@/lib/domain/paper";
 import { completedCandles, suggestedQuoteUsd } from "@/lib/domain/signals";
@@ -17,11 +18,11 @@ export type AutoCycleSummary = { evaluated: number; previewed: number; submitted
 
 /**
  * Submits a previewed order and, as the trade page does, records the fill straight away when Coinbase
- * already reports it. Sent means it reached the exchange: still `submitted`, or already `filled`.
+ * already reports it. Sent means it reached the exchange: still in flight, or already filled.
  */
 async function submitAndSettle(userId: string, orderId: string): Promise<{ order: AssistedOrder; sent: boolean }> {
   const order = await settleAssisted(userId, await submitAssisted(userId, orderId));
-  return { order, sent: order.status === "submitted" || order.status === "filled" };
+  return { order, sent: ASSISTED_STATUS[order.status].inFlightOrFilled };
 }
 
 // Per-process guard: one cycle per account at a time, so a double click cannot stack orders.
