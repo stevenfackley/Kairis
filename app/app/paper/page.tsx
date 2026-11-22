@@ -5,14 +5,12 @@ import { ModeBadge } from "@/components/mode-badge";
 import { PaperTicket } from "@/components/paper-ticket";
 import { PositionsTable } from "@/components/positions-table";
 import { isUuid, MAX_TICKET_USD, normalizeProductId } from "@/lib/domain/order-form";
-import { buildPositions, dayStats } from "@/lib/domain/paper";
+import { dayStats } from "@/lib/domain/paper";
 import { PAPER_TAKER_FEE_RATE, WATCHLIST } from "@/lib/domain/strategy";
 import { usdPrice } from "@/lib/domain/money";
 import { num, usd, when } from "@/lib/format";
 import { getLimits } from "@/lib/server/repos/limits";
-import { listPaperTrades } from "@/lib/server/repos/paper";
-import { HISTORY_LIMIT } from "@/lib/server/services/risk";
-import { getReferencePrices } from "@/lib/server/services/market";
+import { loadPaperBook } from "@/lib/server/services/paper";
 import { requireOnboarded } from "@/lib/server/session";
 import type { DayStats, PaperTrade, TradingLimits } from "@/lib/types";
 
@@ -61,10 +59,7 @@ function noteCell(trade: PaperTrade): { note: string; reason: string | null } {
 export default async function PaperPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireOnboarded("/app/paper");
   const defaults = ticketDefaults(await searchParams);
-  const [limits, trades] = await Promise.all([getLimits(user.id), listPaperTrades(user.id, HISTORY_LIMIT)]);
-  const held = Object.keys(buildPositions(trades, {}));
-  const prices = held.length > 0 ? await getReferencePrices(held) : {};
-  const positions = buildPositions(trades, prices);
+  const [limits, { trades, positions, prices }] = await Promise.all([getLimits(user.id), loadPaperBook(user.id)]);
   const holdings = Object.fromEntries(Object.entries(positions).map(([productId, p]) => [productId, p.baseSize]));
   const now = new Date();
   const today = dayStats(trades, now);

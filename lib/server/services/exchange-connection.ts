@@ -5,12 +5,12 @@ import { getProductRules } from "@/lib/exchange/coinbase-public";
 import { normalizeExchangeError } from "@/lib/exchange/errors";
 import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials, type CoinbaseCredentials } from "@/lib/exchange/keys";
 import { createMockClient } from "@/lib/exchange/mock";
-import type { ExchangeClient, KeyPermissions } from "@/lib/exchange/types";
+import type { ExchangeClient, ExchangeProviderName, KeyPermissions } from "@/lib/exchange/types";
 import { appendAudit } from "@/lib/server/repos/audit";
 import { deleteConnection, getConnection, saveConnection } from "@/lib/server/repos/exchange";
 import { getOnboarding, saveOnboarding } from "@/lib/server/repos/onboarding";
 import { getReferencePrice } from "@/lib/server/services/market";
-import type { ExchangeConnection } from "@/lib/types";
+import type { ExchangeConnection, TradeMode } from "@/lib/types";
 
 async function setExchangeConnected(userId: string, exchangeConnected: boolean): Promise<void> {
   const current = await getOnboarding(userId);
@@ -114,11 +114,25 @@ export async function getConnectionStatus(userId: string): Promise<ExchangeConne
   };
 }
 
-// The user's Coinbase key when one is stored and the server can open it; otherwise the mock provider,
-// which enforces the same Coinbase product rules so mock users meet the same refusals.
+/**
+ * The provider a user's orders go to: Coinbase when a key is stored and this server can open it
+ * (KAIRIS_SECRET_KEY is set), otherwise the mock. getExchangeClient and every page that shows the
+ * provider or the mode use this one rule.
+ */
+export function orderProvider(connection: object | null): ExchangeProviderName {
+  return connection && env.secretKey ? "coinbase" : "mock";
+}
+
+/** The mode a page shows: live only when orders go to Coinbase and the deploy allows live submits. */
+export function tradeMode(connection: object | null): TradeMode {
+  return orderProvider(connection) === "coinbase" && env.liveAssistedTradingEnabled ? "live" : "paper";
+}
+
+// The user's Coinbase key when orderProvider says Coinbase; otherwise the mock provider, which
+// enforces the same Coinbase product rules so mock users meet the same refusals.
 export async function getExchangeClient(userId: string): Promise<ExchangeClient> {
   const stored = await getConnection(userId);
-  if (stored && env.secretKey) {
+  if (stored && orderProvider(stored) === "coinbase") {
     let secret: string;
     try {
       secret = openSecret(stored.sealed, env.secretKey);

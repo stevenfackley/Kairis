@@ -4,35 +4,24 @@ import { togglePauseAction } from "@/app/app/actions";
 import { ModeBadge } from "@/components/mode-badge";
 import { PositionsTable } from "@/components/positions-table";
 import { evaluatedAgo, isSignalStale } from "@/components/signal-card";
-import { buildPositions, dayStats } from "@/lib/domain/paper";
+import { ASSISTED_STATUS } from "@/lib/domain/assisted-status";
+import { dayStats } from "@/lib/domain/paper";
 import { env } from "@/lib/env";
 import { short, usd, when } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { getLimits } from "@/lib/server/repos/limits";
 import { getOnboarding } from "@/lib/server/repos/onboarding";
-import { listPaperTrades } from "@/lib/server/repos/paper";
-import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
-import { getReferencePrices } from "@/lib/server/services/market";
-import { HISTORY_LIMIT } from "@/lib/server/services/risk";
+import { getConnectionStatus, tradeMode } from "@/lib/server/services/exchange-connection";
+import { loadPaperBook } from "@/lib/server/services/paper";
 import { latestSignalsWithSizing } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
-import type { AssistedStatus, ExecutionMode, SignalAction, TradeMode } from "@/lib/types";
+import type { ExecutionMode, SignalAction } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard | Kairis" };
 
 const MODE_LABEL: Record<ExecutionMode, string> = { paper: "Paper", manual: "Manual", assisted: "Assisted", auto: "Auto (owner)" };
 
 const ACTION_LABEL: Record<SignalAction, string> = { long: "Long setup", observe: "Observe", blocked: "Blocked" };
-
-const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> = {
-  filled: "pill-ok",
-  previewed: "pill-warn",
-  submitted: "pill-warn",
-  cancelled: "pill-bad",
-  expired: "pill-bad",
-  blocked: "pill-bad",
-  failed: "pill-bad"
-};
 
 function signedUsd(n: number): string {
   return n > 0 ? `+${usd(n)}` : usd(n);
@@ -41,21 +30,19 @@ function signedUsd(n: number): string {
 export default async function DashboardPage() {
   const user = await requireOnboarded("/app");
   const limitsPromise = getLimits(user.id);
-  const [limits, signals, onboarding, connection, paperTrades, assistedOrders] = await Promise.all([
+  const [limits, signals, onboarding, connection, paperBook, assistedOrders] = await Promise.all([
     limitsPromise,
     limitsPromise.then((l) => latestSignalsWithSizing(l)),
     getOnboarding(user.id),
     getConnectionStatus(user.id),
-    listPaperTrades(user.id, HISTORY_LIMIT),
+    loadPaperBook(user.id),
     listAssistedOrders(user.id, 50)
   ]);
-  const held = Object.keys(buildPositions(paperTrades, {}));
-  const prices = held.length > 0 ? await getReferencePrices(held) : {};
-  const positions = buildPositions(paperTrades, prices);
+  const { trades: paperTrades, positions, prices } = paperBook;
   const now = new Date();
   const nowMs = now.getTime();
   const today = dayStats(paperTrades, now);
-  const mode: TradeMode = connection && env.secretKey && env.liveAssistedTradingEnabled ? "live" : "paper";
+  const mode = tradeMode(connection);
   const capCount = Object.keys(limits.perSymbolMaxUsd).length;
   const recentOrders = assistedOrders.slice(0, 5);
   const topSignals = signals.slice(0, 3);
@@ -253,7 +240,7 @@ export default async function DashboardPage() {
                     <td>{order.side}</td>
                     <td className="num">{usd(order.quoteUsd)}</td>
                     <td>
-                      <span className={`pill ${STATUS_PILL[order.status]}`}>{order.status}</span>
+                      <span className={`pill ${ASSISTED_STATUS[order.status].tone}`}>{order.status}</span>
                     </td>
                   </tr>
                 ))}

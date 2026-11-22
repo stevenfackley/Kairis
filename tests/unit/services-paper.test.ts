@@ -26,7 +26,7 @@ vi.mock("@/lib/server/services/market", () => ({
   marketDataAgeMs: (s: { ticker: { tradeTime: number } }, nowMs: number) => nowMs - s.ticker.tradeTime
 }));
 
-import { placePaperOrder } from "@/lib/server/services/paper";
+import { loadPaperBook, placePaperOrder } from "@/lib/server/services/paper";
 import { UnknownProductError, unstorableFillReason } from "@/lib/server/services/shared";
 
 const USER = "user-1";
@@ -335,5 +335,47 @@ describe("placePaperOrder", () => {
       expect(decision).toMatchObject({ outcome: "blocked", reasons: ["BTC-USD is not a tradable Coinbase pair."] });
       expect(decision.checks).toContainEqual({ code: "tradable-product", passed: false, detail: "BTC-USD is not a tradable Coinbase pair." });
     });
+  });
+});
+
+describe("loadPaperBook", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("reads the full history and fetches no prices when nothing is held", async () => {
+    m.listPaperTrades.mockResolvedValue([]);
+
+    expect(await loadPaperBook(USER)).toEqual({ trades: [], positions: {}, prices: {} });
+    expect(m.listPaperTrades).toHaveBeenCalledWith(USER, 100_000);
+    expect(m.getReferencePrices).not.toHaveBeenCalled();
+  });
+
+  it("prices only the products still held and marks them at that price", async () => {
+    const trades = [
+      filled({ id: "t4", productId: "SOL-USD", side: "SELL", baseSize: 2, price: 150, createdAt: "2026-10-01T13:00:00.000Z" }),
+      filled({ id: "t3", productId: "ETH-USD", status: "blocked", baseSize: 0, createdAt: "2026-10-01T12:00:00.000Z" }),
+      filled({ id: "t2", productId: "SOL-USD", baseSize: 2, price: 140, createdAt: "2026-10-01T11:00:00.000Z" }),
+      filled({ id: "t1", productId: "BTC-USD", baseSize: 0.01, price: 40000, createdAt: "2026-10-01T10:00:00.000Z" })
+    ];
+    m.listPaperTrades.mockResolvedValue(trades);
+    m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
+
+    const book = await loadPaperBook(USER);
+
+    expect(m.getReferencePrices).toHaveBeenCalledWith(["BTC-USD"]);
+    expect(book.trades).toBe(trades);
+    expect(book.prices).toEqual({ "BTC-USD": PRICE });
+    expect(book.positions).toEqual({ "BTC-USD": { baseSize: 0.01, avgCost: 40000, notionalUsd: 0.01 * PRICE } });
+  });
+
+  it("marks a held product whose price is unavailable at its average cost", async () => {
+    m.listPaperTrades.mockResolvedValue([filled({ baseSize: 0.01, price: 40000 })]);
+    m.getReferencePrices.mockResolvedValue({});
+
+    const book = await loadPaperBook(USER);
+
+    expect(book.prices).toEqual({});
+    expect(book.positions).toEqual({ "BTC-USD": { baseSize: 0.01, avgCost: 40000, notionalUsd: 0.01 * 40000 } });
   });
 });

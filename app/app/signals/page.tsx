@@ -5,12 +5,10 @@ import { RefreshButton } from "@/app/app/signals/refresh-button";
 import { ModeBadge } from "@/components/mode-badge";
 import { SignalCard } from "@/components/signal-card";
 import { STRATEGY } from "@/lib/domain/strategy";
-import { env } from "@/lib/env";
 import { getLimits } from "@/lib/server/repos/limits";
-import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
+import { getConnectionStatus, tradeMode } from "@/lib/server/services/exchange-connection";
 import { latestSignalsWithSizing, SIGNAL_REFRESH_AFTER_MS } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
-import type { TradeMode } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Signals | Kairis" };
 
@@ -21,8 +19,7 @@ export default async function SignalsPage() {
   const [limits, connection] = await Promise.all([getLimits(user.id), getConnectionStatus(user.id)]);
   // Re-evaluates the watchlist first when the latest signals are older than 15 minutes.
   const signals = await latestSignalsWithSizing(limits);
-  // Same rule as the app layout: live only with a connected exchange the server can open and the deploy flag on.
-  const mode: TradeMode = connection && env.secretKey && env.liveAssistedTradingEnabled ? "live" : "paper";
+  const mode = tradeMode(connection);
   // Request-time clock for "evaluated N min ago"; this page renders per request.
   const nowMs = new Date().getTime();
   const oldestMs = signals.reduce((oldest, s) => Math.min(oldest, Date.parse(s.evaluatedAt)), Number.POSITIVE_INFINITY);

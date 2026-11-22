@@ -253,6 +253,51 @@ describe("previewAssisted", () => {
       expect(result.order.detail).toContain("Closing the whole BTC-USD position.");
     });
 
+    it("reads the order history once for a close: one risk context sizes and checks it", async () => {
+      const { previewAssisted } = await load(true);
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder: vi.fn(async () => cleanPreview()), balances: vi.fn(async () => [{ currency: "BTC", available: 0.01 }]) }));
+
+      await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
+
+      expect(m.listAssistedOrders).toHaveBeenCalledTimes(1);
+      expect(m.getLimits).toHaveBeenCalledTimes(1);
+    });
+
+    it("values a live close rounded down to the cent, and audits the risk decision without a close note", async () => {
+      const { previewAssisted } = await load(true);
+      // 0.01 BTC at $50,000.555 is $500.00555: rounded down to $500.00 (to the nearest cent it would be $500.01).
+      const uneven = 50000.555;
+      m.getMarketSnapshot.mockImplementation(async (productId: string) => ({
+        candles: [],
+        ticker: { productId, price: uneven, bestBid: uneven - 1, bestAsk: uneven + 1, tradeTime: Date.now() },
+        fetchedAt: Date.now()
+      }));
+      m.getReferencePrices.mockResolvedValue({ "BTC-USD": uneven });
+      const previewOrder = vi.fn(async () => cleanPreview());
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder, balances: vi.fn(async () => [{ currency: "BTC", available: 0.01 }]) }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
+
+      expect(result.decision.outcome).toBe("approved");
+      expect(result.order).toMatchObject({ status: "previewed", side: "SELL", quoteUsd: 500, orderSize: { kind: "base", baseSize: "0.01" } });
+      const risk = m.appendAudit.mock.calls.filter((c) => c[1] === "risk");
+      expect(risk).toEqual([[USER, "risk", "approved", "live SELL BTC-USD $500.00: approved"]]);
+    });
+
+    it("records a close as $0 and stops it when the market feed is down", async () => {
+      const { previewAssisted } = await load(true);
+      m.getMarketSnapshot.mockRejectedValue(new Error("feed down"));
+      const previewOrder = vi.fn();
+      m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { previewOrder }));
+
+      const result = await previewAssisted(USER, { productId: "BTC-USD", side: "SELL", quoteUsd: 0, closePosition: true });
+
+      expect(previewOrder).not.toHaveBeenCalled();
+      expect(result.decision.outcome).toBe("halted");
+      expect(result.order).toMatchObject({ status: "blocked", side: "SELL", quoteUsd: 0 });
+      expect(m.appendAudit).toHaveBeenCalledWith(USER, "risk", "halted", expect.stringMatching(/^live SELL BTC-USD \$0\.00: /));
+    });
+
     it("blocks closing a position Kairis has no record of", async () => {
       const { previewAssisted } = await load(true);
       m.listAssistedOrders.mockResolvedValue([]);

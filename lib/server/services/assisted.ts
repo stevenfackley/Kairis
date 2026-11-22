@@ -19,7 +19,7 @@ import {
 import { appendAudit } from "@/lib/server/repos/audit";
 import { getConnectionStatus, getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getReferencePrice } from "@/lib/server/services/market";
-import { buildRiskContext, checkOrder } from "@/lib/server/services/risk";
+import { buildRiskContext, checkOrder, checkOrderIn, closeQuoteUsd } from "@/lib/server/services/risk";
 import { errorMessage, loadProductRules, storableUsd, withFailedCheck } from "@/lib/server/services/shared";
 import type { AssistedOrder, OrderIntent, RiskDecision } from "@/lib/types";
 
@@ -85,23 +85,19 @@ export async function previewAssisted(
   intent: AssistedPreviewIntent
 ): Promise<{ decision: RiskDecision; order: AssistedOrder; preview: OrderPreview | null }> {
   await expireAbandoned(userId);
+  // One risk context serves the close size, the risk check and the sizing price.
+  const context = await buildRiskContext(userId, "live", intent.productId);
   // Closing a position: the size is the held coins; the dollar figure (rounded down to the cent, so it
   // never exceeds the position) only feeds the risk checks and the record.
-  let closeBase: number | null = null;
-  let quoteUsd = intent.quoteUsd;
-  if (intent.closePosition) {
-    const held = await buildRiskContext(userId, "live", intent.productId);
-    closeBase = Math.max(0, held.positions[intent.productId]?.baseSize ?? 0);
-    quoteUsd = closeBase > 0 && held.referencePrice > 0 ? floorCents(closeBase * held.referencePrice) : 0;
-  }
+  const closeBase = intent.closePosition ? Math.max(0, context.positions[intent.productId]?.baseSize ?? 0) : null;
   const live: OrderIntent = {
     productId: intent.productId,
     side: intent.closePosition ? "SELL" : intent.side,
-    quoteUsd,
+    quoteUsd: intent.closePosition ? closeQuoteUsd(context, intent.productId, "down") : intent.quoteUsd,
     mode: "live",
     signalId: intent.signalId ?? null
   };
-  const { decision, context } = await checkOrder(userId, live);
+  const { decision } = await checkOrderIn(userId, context, live);
   const client = await getExchangeClient(userId);
   const base: AssistedOrder = {
     id: "",

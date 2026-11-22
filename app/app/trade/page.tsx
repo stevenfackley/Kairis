@@ -8,7 +8,7 @@ import { env } from "@/lib/env";
 import { usd } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { getLimits } from "@/lib/server/repos/limits";
-import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
+import { getConnectionStatus, orderProvider } from "@/lib/server/services/exchange-connection";
 import { requireOnboarded } from "@/lib/server/session";
 import type { Side } from "@/lib/types";
 import { reconcileAction } from "./actions";
@@ -41,8 +41,7 @@ export default async function TradePage({ searchParams }: { searchParams: Search
   const side: Side = first(params.side).toUpperCase() === "SELL" ? "SELL" : "BUY";
   const signal = first(params.signal);
   const signalId = isUuid(signal) ? signal : null;
-  // The server opens the stored key only when KAIRIS_SECRET_KEY is set; otherwise orders use the mock provider.
-  const provider = connection && env.secretKey ? "coinbase" : "mock";
+  const provider = orderProvider(connection);
   const caps = Object.entries(limits.perSymbolMaxUsd);
 
   return (

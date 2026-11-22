@@ -116,11 +116,15 @@ export async function buildRiskContext(userId: string, mode: TradeMode, productI
   };
 }
 
-/** The whole held position at the reference price, in cents (the risk check allows the one-cent round-up). */
-function closeQuoteUsd(context: RiskContext, productId: string): number {
+/**
+ * The whole held position at the reference price, in cents: to the nearest cent for paper (the risk check
+ * allows the one-cent round-up), or rounded down for a live close so the figure never exceeds the position.
+ */
+export function closeQuoteUsd(context: RiskContext, productId: string, rounding: "nearest" | "down"): number {
   const held = context.positions[productId];
   if (!held || isFlat(held.baseSize) || !(context.referencePrice > 0)) return 0;
-  return Math.round(held.baseSize * context.referencePrice * 100) / 100;
+  const cents = held.baseSize * context.referencePrice * 100;
+  return (rounding === "down" ? Math.floor(cents) : Math.round(cents)) / 100;
 }
 
 /**
@@ -133,8 +137,17 @@ export async function checkOrder(
   intent: OrderIntent,
   opts: { closePosition?: boolean } = {}
 ): Promise<{ decision: RiskDecision; context: RiskContext; intent: OrderIntent }> {
-  const context = await buildRiskContext(userId, intent.mode, intent.productId);
-  const resolved: OrderIntent = opts.closePosition ? { ...intent, side: "SELL", quoteUsd: closeQuoteUsd(context, intent.productId) } : intent;
+  return checkOrderIn(userId, await buildRiskContext(userId, intent.mode, intent.productId), intent, opts);
+}
+
+/** checkOrder against a risk context the caller already built, for a caller that also reads the context first. */
+export async function checkOrderIn(
+  userId: string,
+  context: RiskContext,
+  intent: OrderIntent,
+  opts: { closePosition?: boolean } = {}
+): Promise<{ decision: RiskDecision; context: RiskContext; intent: OrderIntent }> {
+  const resolved: OrderIntent = opts.closePosition ? { ...intent, side: "SELL", quoteUsd: closeQuoteUsd(context, intent.productId, "nearest") } : intent;
   const decision = evaluateRisk(context, resolved);
   await appendAudit(
     userId,

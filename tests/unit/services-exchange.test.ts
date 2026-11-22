@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { generateKeyBase64, openSecret, type Sealed } from "@/lib/domain/crypto";
+import { generateKeyBase64, openSecret, sealSecret, type Sealed } from "@/lib/domain/crypto";
 import { describeHttpFailure } from "@/lib/exchange/errors";
 import type { KeyPermissions } from "@/lib/exchange/types";
 import type { OnboardingState } from "@/lib/types";
@@ -202,4 +202,59 @@ describe("getExchangeClient", () => {
     expect((await getExchangeClient(USER)).provider).toBe("mock");
     expect(m.createCoinbaseClient).not.toHaveBeenCalled();
   });
+
+  it("opens the stored key with KAIRIS_SECRET_KEY and returns the Coinbase client", async () => {
+    const secretKey = generateKeyBase64();
+    const { getExchangeClient } = await load(secretKey);
+    const coinbase = { provider: "coinbase" };
+    m.createCoinbaseClient.mockReturnValue(coinbase);
+    m.getConnection.mockResolvedValue({ userId: USER, provider: "coinbase", keyId: KEY_ID, sealed: sealSecret(PKCS8, secretKey) });
+
+    expect(await getExchangeClient(USER)).toBe(coinbase);
+    expect(m.createCoinbaseClient).toHaveBeenCalledWith({ keyId: KEY_ID, secret: PKCS8 });
+  });
+
+  it("uses the provider orderProvider names for the same stored connection", async () => {
+    for (const secretKey of ["", generateKeyBase64()]) {
+      const { getExchangeClient, orderProvider } = await load(secretKey);
+      const stored = { userId: USER, provider: "coinbase", keyId: KEY_ID, sealed: secretKey ? sealSecret(PKCS8, secretKey) : {} };
+      m.createCoinbaseClient.mockReturnValue({ provider: "coinbase" });
+      m.getConnection.mockResolvedValue(stored);
+      expect((await getExchangeClient(USER)).provider).toBe(orderProvider(stored));
+    }
+  });
+
+  it("refuses, rather than falling back to the mock, when the stored key cannot be opened", async () => {
+    const { getExchangeClient } = await load(generateKeyBase64());
+    m.getConnection.mockResolvedValue({ userId: USER, provider: "coinbase", keyId: KEY_ID, sealed: sealSecret(PKCS8, generateKeyBase64()) });
+
+    await expect(getExchangeClient(USER)).rejects.toThrow(
+      "The stored Coinbase secret could not be decrypted (KAIRIS_SECRET_KEY changed?); reconnect the exchange."
+    );
+    expect(m.createCoinbaseClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("orderProvider and tradeMode", () => {
+  const connection = { keyId: KEY_ID };
+  const cases = [
+    { connected: false, secretKey: false, live: false, provider: "mock", mode: "paper" },
+    { connected: false, secretKey: false, live: true, provider: "mock", mode: "paper" },
+    { connected: false, secretKey: true, live: false, provider: "mock", mode: "paper" },
+    { connected: false, secretKey: true, live: true, provider: "mock", mode: "paper" },
+    { connected: true, secretKey: false, live: false, provider: "mock", mode: "paper" },
+    { connected: true, secretKey: false, live: true, provider: "mock", mode: "paper" },
+    { connected: true, secretKey: true, live: false, provider: "coinbase", mode: "paper" },
+    { connected: true, secretKey: true, live: true, provider: "coinbase", mode: "live" }
+  ] as const;
+
+  for (const c of cases) {
+    it(`connected=${c.connected} secretKey=${c.secretKey} live=${c.live}: ${c.provider}, ${c.mode}`, async () => {
+      vi.stubEnv("ENABLE_LIVE_ASSISTED_TRADING", c.live ? "true" : "false");
+      const { orderProvider, tradeMode } = await load(c.secretKey ? generateKeyBase64() : "");
+      const conn = c.connected ? connection : null;
+      expect(orderProvider(conn)).toBe(c.provider);
+      expect(tradeMode(conn)).toBe(c.mode);
+    });
+  }
 });
