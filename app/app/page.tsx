@@ -4,16 +4,14 @@ import { togglePauseAction } from "@/app/app/actions";
 import { ModeBadge } from "@/components/mode-badge";
 import { PositionsTable } from "@/components/positions-table";
 import { evaluatedAgo, isSignalStale } from "@/components/signal-card";
-import { buildPositions, dayStats } from "@/lib/domain/paper";
+import { dayStats } from "@/lib/domain/paper";
 import { env } from "@/lib/env";
 import { short, usd, when } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
 import { getLimits } from "@/lib/server/repos/limits";
 import { getOnboarding } from "@/lib/server/repos/onboarding";
-import { listPaperTrades } from "@/lib/server/repos/paper";
 import { getConnectionStatus, tradeMode } from "@/lib/server/services/exchange-connection";
-import { getReferencePrices } from "@/lib/server/services/market";
-import { HISTORY_LIMIT } from "@/lib/server/services/risk";
+import { loadPaperBook } from "@/lib/server/services/paper";
 import { latestSignalsWithSizing } from "@/lib/server/services/signals";
 import { requireOnboarded } from "@/lib/server/session";
 import type { AssistedStatus, ExecutionMode, SignalAction } from "@/lib/types";
@@ -41,17 +39,15 @@ function signedUsd(n: number): string {
 export default async function DashboardPage() {
   const user = await requireOnboarded("/app");
   const limitsPromise = getLimits(user.id);
-  const [limits, signals, onboarding, connection, paperTrades, assistedOrders] = await Promise.all([
+  const [limits, signals, onboarding, connection, paperBook, assistedOrders] = await Promise.all([
     limitsPromise,
     limitsPromise.then((l) => latestSignalsWithSizing(l)),
     getOnboarding(user.id),
     getConnectionStatus(user.id),
-    listPaperTrades(user.id, HISTORY_LIMIT),
+    loadPaperBook(user.id),
     listAssistedOrders(user.id, 50)
   ]);
-  const held = Object.keys(buildPositions(paperTrades, {}));
-  const prices = held.length > 0 ? await getReferencePrices(held) : {};
-  const positions = buildPositions(paperTrades, prices);
+  const { trades: paperTrades, positions, prices } = paperBook;
   const now = new Date();
   const nowMs = now.getTime();
   const today = dayStats(paperTrades, now);

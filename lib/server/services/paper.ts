@@ -1,12 +1,27 @@
 import { usdPrice } from "@/lib/domain/money";
-import { fillPaperOrder, type PaperFillOptions } from "@/lib/domain/paper";
+import { buildPositions, fillPaperOrder, type PaperFillOptions } from "@/lib/domain/paper";
 import { sizeMarketOrder } from "@/lib/exchange/sizing";
 import { num, usd } from "@/lib/format";
 import { appendAudit } from "@/lib/server/repos/audit";
-import { insertPaperTrade } from "@/lib/server/repos/paper";
-import { checkOrder } from "@/lib/server/services/risk";
+import { insertPaperTrade, listPaperTrades } from "@/lib/server/repos/paper";
+import { getReferencePrices } from "@/lib/server/services/market";
+import { checkOrder, HISTORY_LIMIT } from "@/lib/server/services/risk";
 import { loadProductRules, storablePrice, storableUsd, unstorableFillReason, withFailedCheck } from "@/lib/server/services/shared";
-import type { OrderIntent, PaperTrade, RiskDecision } from "@/lib/types";
+import type { OrderIntent, PaperTrade, PositionMap, RiskDecision } from "@/lib/types";
+
+export type PaperBook = { trades: PaperTrade[]; positions: PositionMap; prices: Record<string, number> };
+
+/**
+ * The paper book the dashboard and the paper page show: the trades (newest first, as far back as the risk
+ * engine reads them), the held positions marked at the reference price, and those prices. A product whose
+ * price cannot be fetched is left out of `prices`, and its position is marked at its average cost.
+ */
+export async function loadPaperBook(userId: string): Promise<PaperBook> {
+  const trades = await listPaperTrades(userId, HISTORY_LIMIT);
+  const held = Object.keys(buildPositions(trades, {}));
+  const prices = held.length > 0 ? await getReferencePrices(held) : {};
+  return { trades, positions: buildPositions(trades, prices), prices };
+}
 
 /**
  * Risk-checks, sizes and simulates one paper order the way a live order is handled, so switching to live
