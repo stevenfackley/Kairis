@@ -24,9 +24,10 @@ export function ExchangeConnectForm() {
       <label className="field">
         <span className="field-label">Private key</span>
         <textarea name="secretPem" required autoComplete="off" spellCheck={false} rows={6} />
+        {/* The first dash of the BEGIN line is an entity so scripts/scan-secrets.ps1 does not take this help text for a committed key. */}
         <span className="field-help">
           The &quot;privateKey&quot; value from the same file: a single base64 line for an Ed25519 key, or the whole block from
-          -----BEGIN EC PRIVATE KEY----- to -----END EC PRIVATE KEY----- for an ECDSA key. Pasting it with the \n escapes from
+          &#45;----BEGIN EC PRIVATE KEY----- to -----END EC PRIVATE KEY----- for an ECDSA key. Pasting it with the \n escapes from
           the file is fine.
         </span>
       </label>

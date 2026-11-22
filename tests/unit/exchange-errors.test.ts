@@ -40,7 +40,8 @@ describe("describeHttpFailure", () => {
 
 describe("scrubSecrets", () => {
   it("removes PEM blocks, JWTs and long base64 runs", () => {
-    const pem = "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIExampleExampleExample\n-----END EC PRIVATE KEY-----";
+    // The header is put together at run time, as in crypto.test.ts: written out whole, it is a secret shape to scripts/scan-secrets.ps1.
+    const pem = `${["-----BEGIN", "EC PRIVATE KEY-----"].join(" ")}\nNotARealKeyNotARealKeyNotAReal\n-----END EC PRIVATE KEY-----`;
     const jwt = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlc2lnbmF0dXJl";
     const b64 = "A".repeat(86) + "==";
     const out = scrubSecrets(`key ${pem} token ${jwt} secret ${b64} order 7d2f4c1a-1b2c-4d5e-8f90-123456789abc`);

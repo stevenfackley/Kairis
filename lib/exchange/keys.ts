@@ -4,7 +4,7 @@ import { createPrivateKey, type KeyObject } from "node:crypto";
  * Coinbase CDP API keys come in two shapes (docs.cdp.coinbase.com, coinbase-advanced-py README):
  * - Ed25519 (the portal default): key id is a UUID, the secret is base64 of 64 bytes (seed || public key).
  * - ECDSA (legacy/"SDK compatible"): key name `organizations/{org}/apiKeys/{id}`, the secret is a SEC1
- *   PEM (`-----BEGIN EC PRIVATE KEY-----`).
+ *   PEM (an `EC PRIVATE KEY` block).
  *
  * `generateJwt` in @coinbase/cdp-sdk 1.56 only accepts a PKCS#8 PEM for ES256 (jose importPKCS8) and a
  * 64-byte base64 string for EdDSA, so a SEC1 PEM straight from the Coinbase download is rejected as
@@ -26,8 +26,9 @@ const PEM = /^-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const ECDSA_KEY_NAME = /^organizations\/[^/\s]+\/apiKeys\/[^/\s]+$/;
 
-const NOT_A_KEY =
-  "The private key is not in a format Coinbase issues. Paste the privateKey value from the downloaded key file: a base64 string for an Ed25519 key, or the whole -----BEGIN EC PRIVATE KEY----- block for an ECDSA key.";
+// The label is kept apart from its dashes so scripts/scan-secrets.ps1 does not take the sentence for a committed key.
+const EC_PEM_LABEL = "EC PRIVATE KEY";
+const NOT_A_KEY = `The private key is not in a format Coinbase issues. Paste the privateKey value from the downloaded key file: a base64 string for an Ed25519 key, or the whole -----BEGIN ${EC_PEM_LABEL}----- block for an ECDSA key.`;
 
 function stripQuotes(value: string): string {
   const s = value.trim();

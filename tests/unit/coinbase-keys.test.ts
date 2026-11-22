@@ -5,6 +5,8 @@ import { CoinbaseKeyFormatError, normalizeCoinbaseCredentials } from "@/lib/exch
 
 const ECDSA_NAME = "organizations/3f1c2b7a-0000-4000-8000-000000000001/apiKeys/9a8b7c6d-0000-4000-8000-000000000002";
 const ED_ID = "6c1d2e3f-0000-4000-8000-000000000003";
+// Put together at run time, as in crypto.test.ts: written out whole, the header is a secret shape to scripts/scan-secrets.ps1.
+const EC_BEGIN = ["-----BEGIN", "EC PRIVATE KEY-----"].join(" ");
 
 function ecKey() {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -128,8 +130,8 @@ describe("normalizeCoinbaseCredentials", () => {
       ["not a key", /not in a format Coinbase issues/],
       [Buffer.alloc(48, 1).toString("base64"), /not in a format Coinbase issues/],
       [damaged, /damaged/],
-      ["-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----", /BEGIN and END lines do not match/],
-      ["-----BEGIN EC PRIVATE KEY-----\n!!!!\n-----END EC PRIVATE KEY-----", /not in a format Coinbase issues/]
+      [`${EC_BEGIN}\nAAAA\n-----END PRIVATE KEY-----`, /BEGIN and END lines do not match/],
+      [`${EC_BEGIN}\n!!!!\n-----END EC PRIVATE KEY-----`, /not in a format Coinbase issues/]
     ];
     for (const [secret, message] of cases) {
       let caught: unknown;
@@ -142,6 +144,18 @@ describe("normalizeCoinbaseCredentials", () => {
       expect((caught as Error).message).toMatch(message);
       if (secret.length > 70) expect((caught as Error).message).not.toContain(secret.slice(40, 70));
     }
+  });
+
+  it("spells out the EC header in the message for something that is not a key", () => {
+    let message = "";
+    try {
+      normalizeCoinbaseCredentials(ECDSA_NAME, "not a key");
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe(
+      `The private key is not in a format Coinbase issues. Paste the privateKey value from the downloaded key file: a base64 string for an Ed25519 key, or the whole ${EC_BEGIN} block for an ECDSA key.`
+    );
   });
 
   it("refuses a missing id, a missing secret, or the private key pasted into the id box", () => {
