@@ -195,4 +195,11 @@ describe("getExchangeClient", () => {
     m.getConnection.mockResolvedValue(null);
     expect((await getExchangeClient(USER)).provider).toBe("mock");
   });
+
+  it("falls back to the mock provider when a key is stored but KAIRIS_SECRET_KEY is unset", async () => {
+    const { getExchangeClient } = await load("");
+    m.getConnection.mockResolvedValue({ userId: USER, provider: "coinbase", keyId: KEY_ID, sealed: {} });
+    expect((await getExchangeClient(USER)).provider).toBe("mock");
+    expect(m.createCoinbaseClient).not.toHaveBeenCalled();
+  });
 });

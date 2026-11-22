@@ -10,7 +10,7 @@ const m = vi.hoisted(() => ({
   buildRiskContext: vi.fn(),
   getMarketSnapshot: vi.fn(),
   appendAudit: vi.fn(),
-  getConnectionStatus: vi.fn()
+  getExchangeClient: vi.fn()
 }));
 
 vi.mock("@/lib/server/services/signals", () => ({ refreshSignals: m.refreshSignals }));
@@ -23,7 +23,7 @@ vi.mock("@/lib/server/services/risk", () => ({ buildRiskContext: m.buildRiskCont
 vi.mock("@/lib/server/services/market", () => ({ getMarketSnapshot: m.getMarketSnapshot }));
 vi.mock("@/lib/server/repos/limits", () => ({ getLimits: m.getLimits }));
 vi.mock("@/lib/server/repos/audit", () => ({ appendAudit: m.appendAudit }));
-vi.mock("@/lib/server/services/exchange-connection", () => ({ getConnectionStatus: m.getConnectionStatus }));
+vi.mock("@/lib/server/services/exchange-connection", () => ({ getExchangeClient: m.getExchangeClient }));
 
 const USER = "owner-1";
 
@@ -68,7 +68,7 @@ beforeEach(() => {
   m.getLimits.mockResolvedValue(limits);
   m.buildRiskContext.mockResolvedValue({ positions: {} });
   m.appendAudit.mockResolvedValue(undefined);
-  m.getConnectionStatus.mockResolvedValue({ userId: USER, provider: "coinbase", canTrade: true });
+  m.getExchangeClient.mockResolvedValue({ provider: "coinbase" });
   // By default nothing has filled yet: settle hands the submitted order back unchanged.
   m.settleAssisted.mockImplementation(async (_user: string, order: Partial<AssistedOrder>) => order);
 });
@@ -96,9 +96,11 @@ describe("runAutoCycle", () => {
     expect(m.refreshSignals).not.toHaveBeenCalled();
   });
 
-  it("refuses without a connected Coinbase key instead of trading against the mock provider", async () => {
+  it("refuses whenever orders would go to the mock provider instead of Coinbase", async () => {
     const { runAutoCycle } = await load({ auto: true, live: true });
-    m.getConnectionStatus.mockResolvedValue(null);
+    // No stored key, or a stored key with KAIRIS_SECRET_KEY unset: either way getExchangeClient hands back the mock.
+    m.getExchangeClient.mockResolvedValue({ provider: "mock" });
+    m.refreshSignals.mockResolvedValue([]);
     await expect(runAutoCycle(USER, { isOwner: true })).rejects.toThrow("Auto mode needs a connected Coinbase key.");
     expect(m.refreshSignals).not.toHaveBeenCalled();
   });

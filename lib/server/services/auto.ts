@@ -6,7 +6,7 @@ import { env } from "@/lib/env";
 import { appendAudit } from "@/lib/server/repos/audit";
 import { getLimits } from "@/lib/server/repos/limits";
 import { previewAssisted, settleAssisted, submitAssisted } from "@/lib/server/services/assisted";
-import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
+import { getExchangeClient } from "@/lib/server/services/exchange-connection";
 import { getMarketSnapshot } from "@/lib/server/services/market";
 import { buildRiskContext } from "@/lib/server/services/risk";
 import { errorMessage } from "@/lib/server/services/shared";
@@ -49,9 +49,9 @@ export async function runAutoCycle(userId: string, caller: { isOwner: boolean })
   }
   running.add(userId);
   try {
-    // Without a stored key the exchange client falls back to the mock provider; auto mode must not
-    // record mock fills as live positions.
-    if (!(await getConnectionStatus(userId))) {
+    // Without a stored key the server can open (KAIRIS_SECRET_KEY set), the exchange client falls back to
+    // the mock provider; auto mode must not record mock fills as live positions.
+    if ((await getExchangeClient(userId)).provider !== "coinbase") {
       throw new Error("Auto mode needs a connected Coinbase key.");
     }
     return await cycle(userId);

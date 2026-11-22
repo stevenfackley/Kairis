@@ -148,7 +148,7 @@ beforeEach(() => {
   m.getReferencePrices.mockResolvedValue({ "BTC-USD": PRICE });
   m.getReferencePrice.mockResolvedValue(PRICE);
   m.getProductRules.mockResolvedValue(BTC_RULES);
-  m.expireStalePreviews.mockResolvedValue(0);
+  m.expireStalePreviews.mockResolvedValue([]);
   m.getAssistedOrder.mockImplementation(async () => current);
   m.claimPreviewedOrder.mockImplementation(async () => {
     if (current.status !== "previewed" || claimed) {
@@ -634,6 +634,24 @@ describe("reconcileAssisted", () => {
     expect(m.appendAudit).toHaveBeenCalledWith(USER, "operations", "reconcile-assisted-orders", "Checked 6, updated 4.");
   });
 
+  it("audits each status change it records, as settle does", async () => {
+    const { reconcileAssisted } = await load(true);
+    m.listPendingAssistedOrders.mockResolvedValue(Object.keys(statuses).map(pending));
+    m.getExchangeClient.mockResolvedValue(fakeClient("coinbase", { getOrder: vi.fn(async (orderId: string) => statuses[orderId]!) }));
+    m.updateAssistedOrder.mockImplementation(async (id: string, patch: Partial<AssistedOrder>) => ({ ...pending(id.replace(/^id-/, "")), ...patch }));
+
+    await reconcileAssisted(USER);
+
+    const audited = m.appendAudit.mock.calls.filter((c) => c[1] === "assisted-order").map((c) => [c[2], c[3]]);
+    // OPEN and the unknown status leave the status unchanged, so they get no row of their own.
+    expect(audited).toEqual([
+      ["filled", "BUY BTC-USD $100.00: Filled 0.002 BTC at an average $50,000.00, fees $0.60."],
+      ["cancelled", "BUY BTC-USD $100.00: Coinbase reported CANCELLED; nothing was filled."],
+      ["filled", "BUY BTC-USD $100.00: Partially filled 0.0012 BTC at an average $50,010.50, fees $0.36; Coinbase reported CANCELLED for the rest."],
+      ["failed", "BUY BTC-USD $100.00: Coinbase reported FAILED; nothing was filled. Coinbase says: Insufficient balance."]
+    ]);
+  });
+
   it("writes fill sizes and sub-dollar prices through the shared formatters", async () => {
     const { reconcileAssisted } = await load(true);
     const fills: Record<string, OrderStatus> = {
@@ -654,13 +672,22 @@ describe("reconcileAssisted", () => {
   it("expires previews abandoned for more than 2 minutes on every reconcile and preview", async () => {
     const { reconcileAssisted, previewAssisted } = await load(true);
     m.listPendingAssistedOrders.mockResolvedValue([]);
-    m.expireStalePreviews.mockResolvedValue(2);
+    const abandoned = "Preview expired after 2 minutes without a submit; nothing was sent.";
+    m.expireStalePreviews.mockResolvedValue([
+      order({ id: "id-a", status: "expired", detail: abandoned }),
+      order({ id: "id-b", status: "expired", side: "SELL", productId: "ETH-USD", quoteUsd: 40, detail: abandoned })
+    ]);
 
     await reconcileAssisted(USER);
     const [userId, cutoff, detail] = m.expireStalePreviews.mock.calls[0]!;
     expect(userId).toBe(USER);
     expect(Date.now() - Date.parse(cutoff as string)).toBeGreaterThanOrEqual(120_000);
-    expect(detail).toBe("Preview expired after 2 minutes without a submit; nothing was sent.");
+    expect(detail).toBe(abandoned);
+    // Each expired preview gets its own row, as an expiry found at submit does.
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "assisted-order", "expired", `BUY BTC-USD $100.00: ${abandoned}`);
+    expect(m.appendAudit).toHaveBeenCalledWith(USER, "assisted-order", "expired", `SELL ETH-USD $40.00: ${abandoned}`);
+
+    m.expireStalePreviews.mockResolvedValue([]);
 
     m.insertAssistedOrder.mockImplementation(async (o: AssistedOrder) => ({ ...o, id: ORDER_ID }));
     m.getExchangeClient.mockResolvedValue(createMockClient(async () => PRICE, () => "mock-x", async () => BTC_RULES));
@@ -691,6 +718,8 @@ describe("reconcileAssisted", () => {
       detail: "Coinbase has no order with this client order id 10 minutes on, so it was never placed."
     });
     expect(patchFor("id-recent")).toEqual({ detail: "Coinbase has no order with this client order id yet; reconcile again in a minute." });
+    const audited = m.appendAudit.mock.calls.filter((c) => c[1] === "assisted-order").map((c) => c[2]);
+    expect(audited).toEqual(["failed", "filled"]);
   });
 
   it("keeps an order queued on a retriable error and marks it errored otherwise", async () => {

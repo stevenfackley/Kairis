@@ -21,8 +21,8 @@ export default async function SignalsPage() {
   const [limits, connection] = await Promise.all([getLimits(user.id), getConnectionStatus(user.id)]);
   // Re-evaluates the watchlist first when the latest signals are older than 15 minutes.
   const signals = await latestSignalsWithSizing(limits);
-  // Same rule as the app layout: live only with a connected exchange and the deploy flag on.
-  const mode: TradeMode = connection && env.liveAssistedTradingEnabled ? "live" : "paper";
+  // Same rule as the app layout: live only with a connected exchange the server can open and the deploy flag on.
+  const mode: TradeMode = connection && env.secretKey && env.liveAssistedTradingEnabled ? "live" : "paper";
   // Request-time clock for "evaluated N min ago"; this page renders per request.
   const nowMs = new Date().getTime();
   const oldestMs = signals.reduce((oldest, s) => Math.min(oldest, Date.parse(s.evaluatedAt)), Number.POSITIVE_INFINITY);

@@ -215,7 +215,7 @@ describe.skipIf(!enabled)("services", () => {
     expect(await reconcileAssisted(USER)).toEqual({ checked: 0, updated: 0 });
 
     const actions = (await listAudit(USER, { category: "assisted-order" })).map((e) => e.action).sort();
-    expect(actions).toEqual(["previewed", "submitted"]);
+    expect(actions).toEqual(["filled", "previewed", "submitted"]);
   });
 
   it("settles a just-submitted order that already filled", async () => {
