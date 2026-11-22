@@ -1,6 +1,7 @@
 import { STRATEGY } from "@/lib/domain/strategy";
 import { fetchCandles, fetchTicker } from "@/lib/exchange/coinbase-public";
-import { isProductNotFound, UnknownProductError } from "@/lib/server/services/shared";
+import { isUnknownProductResponse } from "@/lib/exchange/errors";
+import { UnknownProductError } from "@/lib/server/services/shared";
 import type { Candle, Ticker } from "@/lib/types";
 
 export type MarketSnapshot = { candles: Candle[]; ticker: Ticker; fetchedAt: number };
@@ -42,7 +43,7 @@ async function load(productId: string): Promise<MarketSnapshot> {
       fetchers.ticker(productId)
     ]);
   } catch (error) {
-    const reported = isProductNotFound(error) ? new UnknownProductError(productId) : error;
+    const reported = isUnknownProductResponse(error, "about-product") ? new UnknownProductError(productId) : error;
     failures.set(productId, { error: reported, at: Date.now() });
     throw reported;
   }

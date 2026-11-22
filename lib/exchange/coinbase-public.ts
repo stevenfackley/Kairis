@@ -1,5 +1,5 @@
 import type { Candle, Ticker } from "@/lib/types";
-import { ExchangeHttpError, ExchangeTransportError, scrubSecrets } from "@/lib/exchange/errors";
+import { ExchangeHttpError, ExchangeTransportError, isUnknownProductResponse, scrubSecrets } from "@/lib/exchange/errors";
 import type { ProductRules } from "@/lib/exchange/sizing";
 import type { FetchLike } from "@/lib/exchange/types";
 
@@ -87,7 +87,7 @@ async function getJson(fetchImpl: FetchLike, url: string): Promise<unknown> {
   }
   if (!response.ok) {
     const body = scrubSecrets((await response.text().catch(() => "")).trim()).slice(0, 200);
-    throw new ExchangeHttpError(response.status, `Coinbase public request failed (${response.status}): ${body}`, null);
+    throw new ExchangeHttpError(response.status, `Coinbase public request failed (${response.status}): ${body}`, null, body);
   }
   return (await response.json()) as unknown;
 }
@@ -155,7 +155,7 @@ export async function fetchProduct(productId: string, fetchImpl: FetchLike = fet
   try {
     return mapProduct(await getJson(fetchImpl, `${baseUrl}/${encodeURIComponent(productId)}`));
   } catch (error) {
-    if (error instanceof ExchangeHttpError && (error.status === 404 || error.status === 400)) {
+    if (isUnknownProductResponse(error, "any")) {
       throw new ExchangeHttpError(error.status, `Coinbase does not offer ${productId} for trading (HTTP ${error.status}).`, null);
     }
     throw error;

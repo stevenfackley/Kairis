@@ -29,7 +29,9 @@ export class ExchangeHttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
-    readonly reason: string | null
+    readonly reason: string | null,
+    /** The response body as kept for the message (scrubbed, truncated), when the caller kept it. */
+    readonly body: string | null = null
   ) {
     super(message);
     this.name = "ExchangeHttpError";
@@ -159,4 +161,16 @@ export function normalizeExchangeError(error: unknown): ExchangeError {
     return build(s.code, message, s.retriable, s.ambiguous, status);
   }
   return build("provider_error", message, false, false, null);
+}
+
+/**
+ * Coinbase answered that the product does not exist, read from the typed error's status and body, never
+ * its message. A 404 always counts. A 400 counts on "any" (the product endpoint, whose only parameter is
+ * the product id) or, on "about-product", only when the body mentions the product (the market data
+ * endpoints also take time and granularity parameters a 400 can be about). Anything else is an outage.
+ */
+export function isUnknownProductResponse(error: unknown, badRequest: "any" | "about-product"): error is ExchangeHttpError {
+  if (!named(error, ExchangeHttpError, "ExchangeHttpError")) return false;
+  if (error.status === 404) return true;
+  return error.status === 400 && (badRequest === "any" || /product/i.test(error.body ?? ""));
 }

@@ -1,6 +1,6 @@
 import { usdPrice } from "@/lib/domain/money";
 import { getProductRules } from "@/lib/exchange/coinbase-public";
-import { normalizeExchangeError } from "@/lib/exchange/errors";
+import { isUnknownProductResponse, normalizeExchangeError } from "@/lib/exchange/errors";
 import type { ProductRules } from "@/lib/exchange/sizing";
 import { num } from "@/lib/format";
 import type { RiskDecision } from "@/lib/types";
@@ -88,23 +88,10 @@ export async function loadProductRules(productId: string): Promise<ProductRulesL
   try {
     return { ok: true, rules: await getProductRules(productId) };
   } catch (error) {
-    const normalized = normalizeExchangeError(error);
-    if (normalized.status === 404 || normalized.status === 400) {
+    if (isUnknownProductResponse(error, "any")) {
       return { ok: false, unknownProduct: true, message: new UnknownProductError(productId).message };
     }
+    const normalized = normalizeExchangeError(error);
     return { ok: false, unknownProduct: false, message: `Kairis could not load the ${productId} trading rules from Coinbase: ${normalized.message}` };
   }
-}
-
-const PUBLIC_FAILURE = /^Coinbase public request failed \((\d{3})\): ([\s\S]*)$/;
-
-/**
- * True when a public market fetch failed because the product does not exist: a 404, or a 400 whose body
- * is about the product id. Timeouts, 5xx and network errors are outages and return false.
- */
-export function isProductNotFound(error: unknown): boolean {
-  const match = PUBLIC_FAILURE.exec(errorMessage(error, ""));
-  if (!match) return false;
-  const status = Number(match[1]);
-  return status === 404 || (status === 400 && /product/i.test(match[2] ?? ""));
 }
