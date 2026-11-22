@@ -1,75 +1,19 @@
+import { parseOrderForm } from "@/lib/domain/order-form";
 import { WATCHLIST } from "@/lib/domain/strategy";
 import type { OrderIntent } from "@/lib/types";
 
-// Local stand-in for lib/domain/order-form.ts (the paper ticket's parser, built on another branch).
-// Same rules: a watchlist product or a custom XXX-USD product, BUY or SELL, and a USD quote above 0,
-// at most 1,000,000, with no more than 2 decimals.
+// The assisted ticket posts the paper ticket's fields and is parsed by the same rules
+// (lib/domain/order-form.ts); this only reshapes the result for previewAssisted. It has no note field.
 
 /** closePosition: sell the whole recorded position by coin amount; quoteUsd is then worked out by the server. */
 export type AssistedIntent = Omit<OrderIntent, "mode"> & { closePosition: boolean };
 export type AssistedFormResult = { ok: true; intent: AssistedIntent } | { ok: false; error: string };
 
-export const CUSTOM_PRODUCT = "custom";
-const PRODUCT_RE = /^[A-Z0-9]{2,10}-USD$/;
-const QUOTE_RE = /^\d+(\.\d{1,2})?$/;
-const MAX_QUOTE_USD = 1_000_000;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function text(form: FormData, name: string): string {
-  const value = form.get(name);
-  return typeof value === "string" ? value.trim() : "";
-}
-
-export function isUuid(value: string): boolean {
-  return UUID_RE.test(value);
-}
-
-export function normalizeProduct(raw: string): string | null {
-  const product = raw.trim().toUpperCase();
-  return PRODUCT_RE.test(product) ? product : null;
-}
-
-export function isWatchlistProduct(product: string): boolean {
-  return (WATCHLIST as readonly string[]).includes(product);
-}
-
 export function parseAssistedForm(form: FormData): AssistedFormResult {
-  const selected = text(form, "productId");
-  const raw = selected === CUSTOM_PRODUCT ? text(form, "customProduct") : selected;
-  if (!raw) {
-    return { ok: false, error: selected === CUSTOM_PRODUCT ? "Enter a custom product such as SOL-USD." : "Choose a product." };
+  const parsed = parseOrderForm(form, WATCHLIST);
+  if (!parsed.ok) {
+    return parsed;
   }
-  const productId = normalizeProduct(raw);
-  if (!productId) {
-    return { ok: false, error: `"${raw}" is not a product such as SOL-USD.` };
-  }
-  const signal = text(form, "signalId");
-  const signalId = isUuid(signal) ? signal : null;
-
-  // "Sell entire position": the size is the held coin amount, so the side and dollar fields do not apply.
-  if (text(form, "closePosition") === "yes") {
-    return { ok: true, intent: { productId, side: "SELL", quoteUsd: 0, signalId, closePosition: true } };
-  }
-
-  const side = text(form, "side");
-  if (side !== "BUY" && side !== "SELL") {
-    return { ok: false, error: "Choose Buy or Sell." };
-  }
-
-  const quoteText = text(form, "quoteUsd");
-  if (!quoteText) {
-    return { ok: false, error: "Enter an order size in USD." };
-  }
-  if (!QUOTE_RE.test(quoteText)) {
-    return { ok: false, error: "Order size must be a dollar amount with at most 2 decimals, such as 50 or 49.99." };
-  }
-  const quoteUsd = Number(quoteText);
-  if (!(quoteUsd > 0)) {
-    return { ok: false, error: "Order size must be greater than $0." };
-  }
-  if (quoteUsd > MAX_QUOTE_USD) {
-    return { ok: false, error: "Order size must be at most $1,000,000." };
-  }
-
-  return { ok: true, intent: { productId, side, quoteUsd, signalId, closePosition: false } };
+  const { productId, side, quoteUsd, signalId, sellAll } = parsed.intent;
+  return { ok: true, intent: { productId, side, quoteUsd, signalId, closePosition: sellAll === true } };
 }

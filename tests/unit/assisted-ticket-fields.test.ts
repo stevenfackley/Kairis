@@ -28,13 +28,13 @@ function fieldNames(html: string): string[] {
 describe("AssistedTicket preview form", () => {
   it("posts the product select, side, size, signal and the sell-entire-position button", () => {
     const html = render("BTC-USD");
-    expect(fieldNames(html)).toEqual(["closePosition", "productId", "quoteUsd", "side", "signalId"]);
-    expect(html).toMatch(/<button(?=[^>]*name="closePosition")(?=[^>]*value="yes")[^>]*>Sell entire position</);
+    expect(fieldNames(html)).toEqual(["intent", "product", "quoteUsd", "side", "signalId"]);
+    expect(html).toMatch(/<button(?=[^>]*name="intent")(?=[^>]*value="sell-all")[^>]*>Sell entire position</);
   });
 
   it("adds the custom product field when the preset product is not on the watchlist", () => {
     const html = render("AVAX-USD");
-    expect(fieldNames(html)).toEqual(["closePosition", "customProduct", "productId", "quoteUsd", "side", "signalId"]);
+    expect(fieldNames(html)).toEqual(["customProduct", "intent", "product", "quoteUsd", "side", "signalId"]);
     expect(html).toMatch(/<option value="custom" selected="">/);
   });
 });

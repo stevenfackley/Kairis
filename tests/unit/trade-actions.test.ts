@@ -44,7 +44,7 @@ beforeEach(() => {
 
 describe("previewAssistedAction", () => {
   it("stops at a form error before any preview", async () => {
-    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ productId: "", side: "BUY", quoteUsd: "10" }));
+    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ product: "", side: "BUY", quoteUsd: "10" }));
     expect(state).toEqual({ step: "error", error: "Choose a product." });
     expect(m.previewAssisted).not.toHaveBeenCalled();
   });
@@ -54,7 +54,7 @@ describe("previewAssistedAction", () => {
     const previewed = order({ provider });
     m.previewAssisted.mockResolvedValue({ decision, order: previewed, preview });
 
-    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ productId: "BTC-USD", side: "BUY", quoteUsd: "25" }));
+    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ product: "BTC-USD", side: "BUY", quoteUsd: "25" }));
 
     expect(m.previewAssisted).toHaveBeenCalledWith("user-1", { productId: "BTC-USD", side: "BUY", quoteUsd: 25, signalId: null, closePosition: false });
     expect(state).toEqual({ step: "previewed", order: previewed, decision, preview });
@@ -64,7 +64,7 @@ describe("previewAssistedAction", () => {
     const blocked = order({ status: "blocked" });
     m.previewAssisted.mockResolvedValue({ decision, order: blocked, preview: null });
 
-    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ productId: "ETH-USD", side: "BUY", quoteUsd: "", closePosition: "yes" }));
+    const state = await previewAssistedAction(INITIAL_PREVIEW, form({ product: "ETH-USD", side: "BUY", quoteUsd: "", intent: "sell-all" }));
 
     expect(m.previewAssisted).toHaveBeenCalledWith("user-1", { productId: "ETH-USD", side: "SELL", quoteUsd: 0, signalId: null, closePosition: true });
     expect(state).toEqual({ step: "blocked", order: blocked, decision });

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AssistedOrdersTable } from "@/components/assisted-orders-table";
 import { AssistedTicket } from "@/components/assisted-ticket";
 import { ModeBadge } from "@/components/mode-badge";
+import { isUuid, MAX_TICKET_USD, normalizeProductId } from "@/lib/domain/order-form";
 import { env } from "@/lib/env";
 import { usd } from "@/lib/format";
 import { listAssistedOrders } from "@/lib/server/repos/assisted";
@@ -11,7 +12,6 @@ import { getConnectionStatus } from "@/lib/server/services/exchange-connection";
 import { requireOnboarded } from "@/lib/server/session";
 import type { Side } from "@/lib/types";
 import { reconcileAction } from "./actions";
-import { isUuid, normalizeProduct } from "./order-form";
 import "./trade.css";
 
 export const metadata: Metadata = { title: "Assisted trading | Kairis" };
@@ -24,7 +24,7 @@ function first(value: string | string[] | undefined): string {
 
 function quoteParam(raw: string): string {
   const n = Number(raw);
-  return raw !== "" && Number.isFinite(n) && n > 0 && n <= 1_000_000 ? n.toFixed(2) : "";
+  return raw !== "" && Number.isFinite(n) && n > 0 && n <= MAX_TICKET_USD ? n.toFixed(2) : "";
 }
 
 export default async function TradePage({ searchParams }: { searchParams: SearchParams }) {
@@ -36,7 +36,7 @@ export default async function TradePage({ searchParams }: { searchParams: Search
     listAssistedOrders(user.id, 50)
   ]);
 
-  const product = normalizeProduct(first(params.product)) ?? "";
+  const product = normalizeProductId(first(params.product)) ?? "";
   const quote = quoteParam(first(params.quote));
   const side: Side = first(params.side).toUpperCase() === "SELL" ? "SELL" : "BUY";
   const signal = first(params.signal);
