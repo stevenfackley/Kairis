@@ -125,6 +125,21 @@ describe("buildRiskContext (live)", () => {
     expect(ctx.today.realizedPnlUsd).toBeCloseTo(-0.48, 10);
   });
 
+  // filled and submitted always count; a terminal non-fill counts only while it reports a partial fill.
+  const exposure: Array<[AssistedOrder["status"], number | null, boolean]> = [];
+  for (const status of ["previewed", "submitted", "filled", "blocked", "failed", "cancelled", "expired"] as const) {
+    for (const filledSize of [null, 0, 0.5]) {
+      const counts = status === "filled" || status === "submitted" || (["failed", "cancelled", "expired"].includes(status) && filledSize === 0.5);
+      exposure.push([status, filledSize, counts]);
+    }
+  }
+
+  it.each(exposure)("counts a %s order with filled size %s toward exposure: %s", async (status, filledSize, counts) => {
+    m.listAssistedOrders.mockResolvedValue([order({ status, filledSize, averagePrice: filledSize ? 100 : null, totalFees: filledSize ? 0.3 : null })]);
+    const ctx = await buildRiskContext(USER, "live", "BTC-USD");
+    expect(ctx.today.tradesCount).toBe(counts ? 1 : 0);
+  });
+
   it("charges what Coinbase reports once an order has filled, not the estimate", async () => {
     // A $100 buy as Coinbase fills it: 99.40357853 of coins and a 0.59642147 fee.
     m.listAssistedOrders.mockResolvedValue([order({ filledSize: 0.99403579, averagePrice: 100, totalFees: 0.59642147, orderSize: { kind: "quote", quoteSize: "100" } })]);
