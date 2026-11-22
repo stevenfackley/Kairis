@@ -1,3 +1,4 @@
+import { countsTowardExposure } from "@/lib/domain/assisted-status";
 import { applyFill, buildPositions, dayStats, isFlat, realizeSell, type Fill, type Lot } from "@/lib/domain/paper";
 import { evaluateRisk } from "@/lib/domain/risk";
 import { STRATEGY, TAKER_FEE_RATE } from "@/lib/domain/strategy";
@@ -26,17 +27,6 @@ async function snapshotFor(productId: string): Promise<SnapshotResult> {
 
 function sortByTime<T extends { createdAt: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-}
-
-// An order counts toward exposure when it filled, when it is still in flight (a submitted market IOC
-// order almost always fills before reconcile runs, so ignoring it would let rapid submits stack past
-// the limits), or when a terminal non-fill status still reports a partial fill.
-function liveExposure(order: AssistedOrder): boolean {
-  if (order.status === "filled" || order.status === "submitted") {
-    return true;
-  }
-  const partial = order.status === "cancelled" || order.status === "expired" || order.status === "failed";
-  return partial && (order.filledSize ?? 0) > 0;
 }
 
 /**
@@ -100,7 +90,7 @@ async function historyFills(userId: string, mode: TradeMode, productId: string):
     const held = Object.keys(buildPositions(fills, {}));
     return { fills, prices: await getReferencePrices([...held, productId]) };
   }
-  const orders = (await listAssistedOrders(userId, HISTORY_LIMIT)).filter(liveExposure);
+  const orders = (await listAssistedOrders(userId, HISTORY_LIMIT)).filter(countsTowardExposure);
   // Unfilled in-flight orders have no average price yet, so every traded product needs a mark.
   const prices = await getReferencePrices([...orders.map((o) => o.productId), productId]);
   return { fills: liveFills(orders, prices), prices };

@@ -4,12 +4,13 @@ import { useActionState, useEffect, useState } from "react";
 import { previewAssistedAction, submitAssistedAction } from "@/app/app/trade/actions";
 import { INITIAL_PREVIEW, INITIAL_SUBMIT, PREVIEW_TTL_SECONDS, freshestOrder, ticketStep } from "@/app/app/trade/state";
 import { RiskDecisionView } from "@/components/risk-decision";
+import { ASSISTED_STATUS } from "@/lib/domain/assisted-status";
 import { CUSTOM_PRODUCT, SELL_ALL_INTENT } from "@/lib/domain/order-form";
 import { WATCHLIST } from "@/lib/domain/strategy";
 import { describeSize } from "@/lib/exchange/sizing";
 import type { OrderPreview } from "@/lib/exchange/types";
 import { usd } from "@/lib/format";
-import type { AssistedOrder, AssistedStatus, Side } from "@/lib/types";
+import type { AssistedOrder, Side } from "@/lib/types";
 
 type Provider = AssistedOrder["provider"];
 
@@ -22,16 +23,6 @@ type TicketProps = {
   signalId: string | null;
   /** The page's recent orders, so a result line follows the order through Reconcile. */
   recentOrders: AssistedOrder[];
-};
-
-const STATUS_PILL: Record<AssistedStatus, "pill-ok" | "pill-warn" | "pill-bad"> = {
-  filled: "pill-ok",
-  previewed: "pill-warn",
-  submitted: "pill-warn",
-  blocked: "pill-bad",
-  failed: "pill-bad",
-  cancelled: "pill-bad",
-  expired: "pill-bad"
 };
 
 const STEPS = ["Check and preview", "Confirm", "Result"] as const;
@@ -135,9 +126,9 @@ function ResultPanel({ order, onReset }: { order: AssistedOrder; onReset: () => 
   return (
     <section className="ticket-result" aria-live="polite">
       <p className="ticket-summary">
-        <span className={`pill ${STATUS_PILL[order.status]}`}>{order.status}</span> {order.side} {order.productId} {usd(order.quoteUsd)}
+        <span className={`pill ${ASSISTED_STATUS[order.status].tone}`}>{order.status}</span> {order.side} {order.productId} {usd(order.quoteUsd)}
       </p>
-      <p className={order.status === "submitted" || order.status === "filled" ? "success-copy" : "error-copy"} role="status">
+      <p className={ASSISTED_STATUS[order.status].inFlightOrFilled ? "success-copy" : "error-copy"} role="status">
         {resultCopy(order)}
       </p>
       {order.status === "blocked" && order.riskDecision ? <RiskDecisionView decision={order.riskDecision} title="Risk checks at submit" /> : null}
