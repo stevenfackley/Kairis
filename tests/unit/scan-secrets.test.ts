@@ -57,6 +57,15 @@ PLANTED.push({
 // A file git ignores is not part of a commit, and the scan must not open it (a local .env is one).
 const IGNORED_PLANT: Plant = { kind: "ignored file", text: FAKE_KEY_ID, file: "node_modules/planted/key.txt" };
 
+// The same ignored folder, but force-added: the file is tracked, so it must be read whatever .gitignore
+// says. `git grep --untracked` alone passes over it, which is why the scan searches tracked and new files
+// in two calls.
+const FORCE_ADDED_PLANT: Plant = {
+  kind: "force-added file in an ignored folder",
+  text: FAKE_KEY_ID,
+  file: "node_modules/planted/force-added.txt"
+};
+
 type Scan = { status: number | null; hits: string[]; bannedPackage: boolean };
 
 // Only what git tracks or would add is copied: a working tree can also hold ignored local files
@@ -124,10 +133,14 @@ describe("scripts/scan-secrets.ps1", () => {
     root = realpathSync.native(mkdtempSync(path.join(scratch, "kairis-scan-")));
     copyCheckout(root);
     clean = scan(root);
-    for (const { file, text, encoding } of [...PLANTED, IGNORED_PLANT]) {
+    for (const { file, text, encoding } of [...PLANTED, IGNORED_PLANT, FORCE_ADDED_PLANT]) {
       const target = path.join(root, file);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, text, encoding ?? "utf8");
+    }
+    const added = spawnSync("git", ["add", "--force", "--", FORCE_ADDED_PLANT.file], { cwd: root, encoding: "utf8" });
+    if (added.error || added.status !== 0) {
+      throw new Error(`git add --force failed in the copy: ${added.error?.message ?? added.stderr}`);
     }
     planted = scan(root);
   }, 120_000);
@@ -147,7 +160,7 @@ describe("scripts/scan-secrets.ps1", () => {
     expect(planted.hits).toContain(`${file}:1`);
   });
 
-  it("does not open a file git ignores", () => {
-    expect(planted.hits.filter((hit) => hit.startsWith("node_modules/"))).toEqual([]);
+  it("reads a force-added file, and no other file git ignores", () => {
+    expect(planted.hits.filter((hit) => hit.startsWith("node_modules/"))).toEqual([`${FORCE_ADDED_PLANT.file}:1`]);
   });
 });
