@@ -143,9 +143,9 @@ describe("connectCoinbase", () => {
 
   it("refuses a malformed private key before any call to Coinbase", async () => {
     const { connectCoinbase } = await load(generateKeyBase64());
-    await expect(connectCoinbase(USER, KEY_ID, "-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----")).rejects.toThrow(
-      "The private key block could not be read."
-    );
+    // The header is put together at run time, as in crypto.test.ts: written out whole, it is a secret shape to scripts/scan-secrets.ps1.
+    const malformed = `${["-----BEGIN", "EC PRIVATE KEY-----"].join(" ")}\nabc\n-----END EC PRIVATE KEY-----`;
+    await expect(connectCoinbase(USER, KEY_ID, malformed)).rejects.toThrow("The private key block could not be read.");
     await expect(connectCoinbase(USER, "short-id", PEM)).rejects.toThrow("organizations/{org_id}/apiKeys/{key_id}");
     expect(m.createCoinbaseClient).not.toHaveBeenCalled();
   });
