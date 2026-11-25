@@ -16,7 +16,9 @@ foreach ($p in $Paths) {
     if (-not (Test-Path $p)) { continue }
     $files = (Get-ChildItem $p -Recurse -File).FullName | Where-Object { [IO.Path]::GetFullPath($_) -ne [IO.Path]::GetFullPath($PSCommandPath) }
     if (-not $files) { continue }
-    $hits = Select-String -Path $files -Pattern $patterns -AllMatches 2>$null
+    # -LiteralPath, not -Path: -Path reads [ and ] as a wildcard, so every file under a folder such as
+    # app/api/auth/[...nextauth] or reports/download/[id] was skipped without a word.
+    $hits = Select-String -LiteralPath $files -Pattern $patterns -AllMatches 2>$null
     if ($hits) {
         Write-Host "::error::Secret-shape:" -ForegroundColor Red
         $hits | ForEach-Object { Write-Host "  $($_.Path):$($_.LineNumber): $($_.Line)" }

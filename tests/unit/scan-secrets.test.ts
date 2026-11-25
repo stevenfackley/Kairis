@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -30,6 +29,14 @@ const PLANTED = SAMPLES.map(([kind, text]) => ({
   text,
   file: `${PLANT_DIR}/${kind.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.txt`
 }));
+
+// Next.js route folders have square brackets in their names, and PowerShell reads those as a wildcard
+// unless the scan asks for literal paths. The sign-in route lives in such a folder.
+PLANTED.push({
+  kind: "secret under a [bracketed] route folder",
+  text: ["AK", "IA", "FAKE".repeat(4)].join(""),
+  file: `${PLANT_DIR}/[...slug]/[id]/route.txt`
+});
 
 type Scan = { status: number | null; hits: string[]; bannedPackage: boolean };
 
@@ -81,7 +88,11 @@ describe("scripts/scan-secrets.ps1", () => {
   let planted: Scan;
 
   beforeAll(() => {
-    root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "kairis-scan-")));
+    // Under node_modules, not os.tmpdir(): the system temp folder can be a network drive, and this copies
+    // the whole checkout on every run. node_modules is local, already ignored by git, and not scanned.
+    const scratch = path.join(REPO, "node_modules", ".cache");
+    mkdirSync(scratch, { recursive: true });
+    root = realpathSync.native(mkdtempSync(path.join(scratch, "kairis-scan-")));
     copyCheckout(root);
     clean = scan(root);
     for (const { file, text } of PLANTED) {
