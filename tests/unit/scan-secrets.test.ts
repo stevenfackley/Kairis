@@ -23,7 +23,10 @@ const SAMPLES: Array<[kind: string, text: string]> = [
     `${["-----BEGIN", label, "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`
   ]),
   // PKCS#8 has no algorithm word in its header. Apple .p8 keys and Google service-account keys look like this.
-  ["PKCS#8 private key block", `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`]
+  ["PKCS#8 private key block", `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`],
+  ["encrypted PKCS#8 private key block", `${["-----BEGIN ENCRYPTED", "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`],
+  // What gpg really writes. The header above it in this list, without BLOCK, is not a real key format.
+  ["PGP private key block as gpg writes it", `${["-----BEGIN PGP", "PRIVATE KEY BLOCK-----"].join(" ")}\nFAKE-NOT-A-KEY\n`]
 ];
 
 type Plant = { kind: string; text: string; file: string; encoding?: BufferEncoding };
@@ -104,9 +107,10 @@ function copyCheckout(to: string): void {
 
 // Runs the copy's own script from the copy's root, the way `pwsh scripts/scan-secrets.ps1` runs in a checkout.
 // Hits come back as "path:line" only, so a failure names the place without repeating what was found there.
-function scan(root: string, cwd: string = root): Scan {
+function scan(root: string, cwd: string = root, env: Record<string, string> = {}): Scan {
   const run = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-File", path.join(root, "scripts", "scan-secrets.ps1")], {
     cwd,
+    env: { ...process.env, ...env },
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024
   });
@@ -168,6 +172,14 @@ describe("scripts/scan-secrets.ps1", () => {
     const fromElsewhere = scan(root, REPO);
     expect(fromElsewhere.status).toBe(1);
     expect(fromElsewhere.hits).toContain(`${PLANTED[0]!.file}:1`);
+  }, 120_000);
+
+  it("is not sent to the wrong folder by the GIT_DIR a git hook hands it", () => {
+    // In a linked worktree git gives hooks and aliases GIT_DIR with no work tree. git then takes the folder
+    // it is pointed at, scripts/, for the top of the tree: every file is listed, none is found, all is "clean".
+    const fromHook = scan(root, root, { GIT_DIR: path.join(root, ".git") });
+    expect(fromHook.status).toBe(1);
+    expect(fromHook.hits).toContain(`${PLANTED[0]!.file}:1`);
   }, 120_000);
 
   it("reads a force-added file, and no other file git ignores", () => {
