@@ -21,7 +21,9 @@ const SAMPLES: Array<[kind: string, text: string]> = [
   ...["RSA", "OPENSSH", "EC", "PGP"].map((label): [string, string] => [
     `${label} private key block`,
     `${["-----BEGIN", label, "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`
-  ])
+  ]),
+  // PKCS#8 has no algorithm word in its header. Apple .p8 keys and Google service-account keys look like this.
+  ["PKCS#8 private key block", `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\nFAKE-NOT-A-KEY\n`]
 ];
 
 type Plant = { kind: string; text: string; file: string; encoding?: BufferEncoding };
