@@ -104,9 +104,9 @@ function copyCheckout(to: string): void {
 
 // Runs the copy's own script from the copy's root, the way `pwsh scripts/scan-secrets.ps1` runs in a checkout.
 // Hits come back as "path:line" only, so a failure names the place without repeating what was found there.
-function scan(root: string): Scan {
+function scan(root: string, cwd: string = root): Scan {
   const run = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-File", path.join(root, "scripts", "scan-secrets.ps1")], {
-    cwd: root,
+    cwd,
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024
   });
@@ -161,6 +161,14 @@ describe("scripts/scan-secrets.ps1", () => {
     expect(planted.status).toBe(1);
     expect(planted.hits).toContain(`${file}:1`);
   });
+
+  it("scans the checkout it lives in, whatever directory it is run from", () => {
+    // REPO is a different checkout from the copy. Run from there by its full path, the copy's script used
+    // to scan REPO, find none of the planted files and report a clean tree.
+    const fromElsewhere = scan(root, REPO);
+    expect(fromElsewhere.status).toBe(1);
+    expect(fromElsewhere.hits).toContain(`${PLANTED[0]!.file}:1`);
+  }, 120_000);
 
   it("reads a force-added file, and no other file git ignores", () => {
     expect(planted.hits.filter((hit) => hit.startsWith("node_modules/"))).toEqual([`${FORCE_ADDED_PLANT.file}:1`]);
