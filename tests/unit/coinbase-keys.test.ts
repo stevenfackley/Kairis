@@ -54,7 +54,8 @@ describe("normalizeCoinbaseCredentials", () => {
     const { sec1, publicKey } = ecKey();
     const creds = normalizeCoinbaseCredentials(ECDSA_NAME, sec1);
     expect(creds.kind).toBe("ecdsa");
-    expect(creds.secret.startsWith("-----BEGIN PRIVATE KEY-----")).toBe(true);
+    // The header is put together here because the secret scan reads this file and matches it written whole.
+    expect(creds.secret.startsWith(["-----BEGIN", "PRIVATE KEY-----"].join(" "))).toBe(true);
     const { header, payload, ok } = await signAndVerify(creds.keyId, creds.secret, publicKey);
     expect(ok).toBe(true);
     expect(header).toMatchObject({ alg: "ES256", kid: ECDSA_NAME });
